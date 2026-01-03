@@ -1,0 +1,34 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # 注意：下面这行 url 里的 travel_db 必须和你数据库名一致
+    url: jdbc:mysql://localhost:3306/travel_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    username: root
+    # !!! 下面这里一定要换成你自己的 MySQL 密码 !!!
+    password: root
+  mvc:
+    pathmatch:
+      matching-strategy: ant_path_matcher
+
+# MyBatis Plus 配置
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# AI 配置 (这里以国内常用的 DeepSeek/通义千问 为例，也可以换成 OpenAI)
+ai:
+  # 下面这个是 DeepSeek 的接口地址，如果你用其他的，请换成对应的 url
+  # 例如通义千问是: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+  url: https://open.bigmodel.cn/api/paas/v4/chat/completions
+  # !!! 替换成你自己的 API Key !!!
+  key: 72156ce82aee493c96b9f8705d36c1d4.87MAs8UTKMvBx1W6
+  # 模型名称
+  model: glm-4-flash
