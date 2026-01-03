@@ -1,7 +1,7 @@
 <template>
   <div class="home-page">
     <div class="hero-wrapper">
-      <div class="hero-bg" style="background-image: url('[https://images.unsplash.com/photo-1506744038136-46273834b3fb?ixlib=rb-1.2.1&auto=format&fit=crop&w=2000&q=80](https://images.unsplash.com/photo-1506744038136-46273834b3fb?ixlib=rb-1.2.1&auto=format&fit=crop&w=2000&q=80)');"></div>
+      <div class="hero-bg" style="background-image: url('https://images.unsplash.com/photo-1506744038136-46273834b3fb?ixlib=rb-1.2.1&auto=format&fit=crop&w=2000&q=80');"></div>
       <div class="hero-overlay">
         <h1 class="slogan">2026，探索未知的世界</h1>
         <div class="big-search-box">
@@ -53,7 +53,7 @@
           <div class="bubble-wrapper">
             <div class="bubble" v-html="msg.content.replace(/\n/g, '<br>')"></div>
             <div v-if="msg.role === 'ai'" class="actions">
-              <el-icon class="save-icon" title="收藏回答" @click="saveAiNote(msg.content)"><Star /></el-icon>
+              <el-icon class="save-icon" title="保存到我的行程" @click="saveAiNote(msg.content)"><Star /></el-icon>
             </div>
           </div>
         </div>
@@ -113,22 +113,31 @@ const sendAi = async () => {
   nextTick(() => { if(chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight })
 }
 
+// 核心修改：保存 AI 回答到行程表
 const saveAiNote = async (content) => {
   if (!currentUser.userId) return ElMessage.warning('请先登录')
   try {
-    const res = await axios.post('http://localhost:8080/ai/saveNote', {
+    // 调用新的 saveItinerary 接口
+    const res = await axios.post('http://localhost:8080/ai/saveItinerary', {
       userId: currentUser.userId,
       content: content
     })
-    if (res.data.code === '200') ElMessage.success('已收藏到笔记')
-    else ElMessage.error(res.data.msg)
-  } catch(e) { ElMessage.error('收藏失败') }
+
+    if (res.data.code === '200') {
+      ElMessage.success('已保存到【我的行程计划】')
+    } else {
+      ElMessage.error(res.data.msg)
+    }
+  } catch(e) {
+    ElMessage.error('保存失败')
+  }
 }
 
 onMounted(() => loadSpots())
 </script>
 
 <style scoped>
+/* 样式保持不变 */
 .hero-wrapper { position: relative; width: 100%; height: 450px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .hero-bg { position: absolute; width: 100%; height: 100%; background-size: cover; background-position: center; filter: brightness(0.7); transition: transform 3s; }
 .hero-wrapper:hover .hero-bg { transform: scale(1.05); }
