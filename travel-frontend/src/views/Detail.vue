@@ -15,6 +15,7 @@
           <div class="img-box">
             <img :src="spot.imageUrl || 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?ixlib=rb-1.2.1&auto=format&fit=crop&w=1000&q=80'" />
           </div>
+
           <div class="info-box">
             <div class="title-row">
               <h1 class="title">{{ spot.name }}</h1>
@@ -38,13 +39,24 @@
             </div>
 
             <div class="price-card">
-              <span class="label">门票价格</span>
-              <div class="price-val">
-                <span v-if="spot.ticketPrice == 0" class="free">免费开放</span>
-                <span v-else class="money">
-                  <span class="symbol">¥</span>{{ spot.ticketPrice }}
-                </span>
+              <div class="price-left">
+                <span class="label">门票价格</span>
+                <div class="price-val">
+                  <span v-if="spot.ticketPrice == 0" class="free">免费开放</span>
+                  <span v-else class="money">
+                    <span class="symbol">¥</span>{{ spot.ticketPrice }}
+                  </span>
+                </div>
               </div>
+              <el-button
+                  v-if="spot.ticketPrice > 0"
+                  type="warning"
+                  size="large"
+                  class="book-btn"
+                  @click="bookTicket"
+              >
+                立即预订
+              </el-button>
             </div>
 
             <div class="desc-box">{{ spot.description }}</div>
@@ -115,12 +127,13 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { Star, StarFilled, EditPen, Share } from '@element-plus/icons-vue'
 
 const route = useRoute()
+const router = useRouter()
 const spotId = route.params.id
 const currentUser = JSON.parse(localStorage.getItem('user') || '{}')
 
@@ -168,7 +181,6 @@ const loadComments = async () => {
 }
 
 const loadAiSummary = async () => {
-  // 异步加载摘要，不阻塞主界面
   try {
     const res = await axios.get(`http://localhost:8080/ai/summary?spotId=${spotId}`)
     if (res.data.code === '200') {
@@ -198,7 +210,33 @@ const toggleFav = async () => {
   }
 }
 
-// 提交评论 (修复版)
+// 🔥 核心修改：预订功能
+const bookTicket = async () => {
+  if (!currentUser.userId) {
+    ElMessage.warning('请先登录')
+    return router.push('/login')
+  }
+
+  try {
+    const res = await axios.post('http://localhost:8080/order/create', {
+      userId: currentUser.userId,
+      spotId: spot.value.spotId,
+      spotName: spot.value.name,
+      price: spot.value.ticketPrice
+    })
+
+    if (res.data.code === '200') {
+      // 跳转支付页
+      router.push(`/payment?orderId=${res.data.data}&price=${spot.value.ticketPrice}`)
+    } else {
+      ElMessage.error(res.data.msg)
+    }
+  } catch(e) {
+    ElMessage.error('创建订单失败')
+  }
+}
+
+// 提交评论
 const submitComment = async () => {
   if (!newComment.content) return ElMessage.warning('评论内容不能为空')
 
@@ -210,13 +248,11 @@ const submitComment = async () => {
       userId: currentUser.userId || 1
     })
 
-    // 🔥 核心修复：必须判断 code 是否为 200
     if (res.data.code === '200') {
       ElMessage.success('评论发布成功！')
       newComment.content = ''
-      loadComments() // 刷新列表
+      loadComments()
     } else {
-      // 如果不是 200 (比如 403)，显示后端返回的具体错误信息 (如：包含违规内容)
       ElMessage.error(res.data.msg)
     }
   } catch (e) {
@@ -253,11 +289,14 @@ onMounted(init)
 .meta-row { display: flex; align-items: center; gap: 15px; margin-bottom: 25px; }
 .views { color: #999; font-size: 13px; }
 
-.price-card { background: #f8fbfd; border: 1px solid #eef6fc; padding: 15px 20px; border-radius: 10px; margin-bottom: 25px; display: flex; align-items: center; }
+/* 价格卡片样式优化 */
+.price-card { background: #f8fbfd; border: 1px solid #eef6fc; padding: 15px 20px; border-radius: 10px; margin-bottom: 25px; display: flex; align-items: center; justify-content: space-between; }
+.price-left { display: flex; align-items: center; }
 .price-card .label { color: #666; margin-right: 15px; }
 .price-val .money { color: #ff5e00; font-size: 36px; font-weight: bold; }
 .price-val .symbol { font-size: 20px; margin-right: 2px; }
 .price-val .free { color: #67c23a; font-size: 24px; font-weight: bold; }
+.book-btn { font-weight: bold; padding: 0 30px; font-size: 16px; box-shadow: 0 4px 10px rgba(255,153,0,0.3); }
 
 .desc-box { color: #555; line-height: 1.6; margin-bottom: 30px; flex: 1; font-size: 15px; }
 .action-row { display: flex; gap: 15px; }
@@ -282,12 +321,10 @@ onMounted(init)
 /* 介绍与评论 */
 .section-block { margin-top: 40px; padding-top: 30px; border-top: 1px dashed #eee; }
 .section-block h3 { border-left: 5px solid #409EFF; padding-left: 12px; font-size: 20px; margin-bottom: 20px; }
-/* 修改部分：让文本自适应高度 */
 .long-text {
   line-height: 1.8;
   color: #444;
   font-size: 16px;
-  /* 允许换行，不设固定高度 */
   white-space: pre-wrap;
   min-height: 100px;
   height: auto;

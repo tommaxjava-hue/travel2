@@ -2,18 +2,27 @@ server:
   port: 8080
 
 spring:
+  # 1. 文件上传配置 (注意缩进)
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
+
+  # 2. 数据库配置 (必须在 spring 下级，与 servlet 对齐)
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    # 注意：下面这行 url 里的 travel_db 必须和你数据库名一致
+    # 这里的 travel_db 需与数据库名一致
     url: jdbc:mysql://localhost:3306/travel_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
     username: root
-    # !!! 下面这里一定要换成你自己的 MySQL 密码 !!!
+    # !!! 替换成你的密码 !!!
     password: root
+
+  # 3. MVC 配置 (必须在 spring 下级)
   mvc:
     pathmatch:
       matching-strategy: ant_path_matcher
 
-# MyBatis Plus 配置
+# MyBatis Plus 配置 (根节点，与 spring 同级)
 mybatis-plus:
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
@@ -23,12 +32,9 @@ mybatis-plus:
       logic-delete-value: 1
       logic-not-delete-value: 0
 
-# AI 配置 (这里以国内常用的 DeepSeek/通义千问 为例，也可以换成 OpenAI)
+# AI 配置 (自定义根节点)
 ai:
-  # 下面这个是 DeepSeek 的接口地址，如果你用其他的，请换成对应的 url
-  # 例如通义千问是: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
   url: https://open.bigmodel.cn/api/paas/v4/chat/completions
-  # !!! 替换成你自己的 API Key !!!
+  # !!! 替换成你的 Key !!!
   key: 72156ce82aee493c96b9f8705d36c1d4.87MAs8UTKMvBx1W6
-  # 模型名称
   model: glm-4-flash

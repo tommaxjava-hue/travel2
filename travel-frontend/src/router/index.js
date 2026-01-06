@@ -14,6 +14,7 @@ import ContentManage from '../views/admin/ContentManage.vue'
 import SpotManage from '../views/admin/SpotManage.vue'
 // 🔥 新增详情页
 import PostDetail from '../views/PostDetail.vue'
+import Payment from '../views/Payment.vue'
 
 const routes = [
     // --- 前台路由 ---
@@ -25,6 +26,8 @@ const routes = [
     { path: '/plan', component: Plan },
     // 🔥 注册详情页
     { path: '/post/:id', component: PostDetail },
+    // 新增支付页路由
+    { path: '/payment', component: Payment },
 
     // --- 后台路由 ---
     {

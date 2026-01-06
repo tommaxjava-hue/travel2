@@ -69,7 +69,7 @@ let map = null
 let markers = []
 let routeLine = null
 
-// 城市坐标映射（简易版，为了地图定位）
+// 城市坐标映射（简易版，为了地图定位，可根据需求扩展）
 const cityCoords = {
   '上海': [31.2304, 121.4737],
   '北京': [39.9042, 116.4074],
@@ -108,7 +108,7 @@ const loadSpots = async () => {
     }
 
     // 地图飞到该城市
-    const center = cityCoords[selectedCity.value] || [31.2304, 121.4737]
+    const center = cityCoords[selectedCity.value] || [39.9042, 116.4074]
     if (map) map.setView(center, 11)
     else initMap(center)
 
@@ -134,12 +134,14 @@ const generateRoute = async () => {
     if (res.data.code === '200') {
       const aiText = res.data.data
       const sortedNames = []
+      // 简单的按逗号分隔解析
       const rawList = aiText.split(/[,，、\n]/)
       rawList.forEach(token => {
         const cleanName = token.trim()
         const spot = selectedSpots.value.find(s => cleanName.includes(s.name) || s.name.includes(cleanName))
         if (spot && !sortedNames.includes(spot)) sortedNames.push(spot)
       })
+      // 如果解析失败，则按原顺序兜底
       const finalRoute = sortedNames.length > 1 ? sortedNames : selectedSpots.value
 
       routeResult.value = finalRoute.map(s => s.name)
@@ -153,13 +155,16 @@ const generateRoute = async () => {
   }
 }
 
+// 🔥 核心修复：绘制路线并检查坐标有效性
 const drawRouteOnMap = (routeSpots) => {
+  // 清除旧标记
   markers.forEach(m => map.removeLayer(m))
   if (routeLine) map.removeLayer(routeLine)
   markers = []
 
   const latlngs = []
   routeSpots.forEach((spot, index) => {
+    // 校验：只有经纬度齐全才绘制，避免新景点无坐标导致报错
     if (spot.latitude && spot.longitude) {
       const marker = L.marker([spot.latitude, spot.longitude])
           .addTo(map)
@@ -170,6 +175,7 @@ const drawRouteOnMap = (routeSpots) => {
     }
   })
 
+  // 绘制折线
   if (latlngs.length > 0) {
     routeLine = L.polyline(latlngs, { color: 'red', weight: 4, dashArray: '10, 10' }).addTo(map)
     map.fitBounds(L.latLngBounds(latlngs))

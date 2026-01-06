@@ -2,7 +2,7 @@
   <div class="ai-add-page">
     <div class="page-header">
       <h2>✨ AI 智能景点录入</h2>
-      <p class="tip">从马蜂窝/携程复制一段介绍，AI 自动帮你提取字段入库。</p>
+      <p class="tip">粘贴一段文本，AI 自动提取名称、地址、票价、经纬度等核心信息。</p>
     </div>
 
     <div class="workspace">
@@ -10,9 +10,10 @@
         <el-input
             v-model="rawText"
             type="textarea"
-            :rows="15"
-            placeholder="请粘贴一段乱七八糟的景点介绍文本，例如：
-外滩位于上海市黄浦区的黄浦江畔，全长1.5公里...门票是免费的，全天开放..."
+            :rows="18"
+            placeholder="请粘贴景点介绍，例如：
+北京环球度假区位于北京市通州区...门票418元...
+（提示：文本越详细，AI 提取越准确）"
         />
         <div class="btn-area">
           <el-button type="primary" size="large" @click="analyzeText" :loading="analyzing" icon="MagicStick">
@@ -23,28 +24,50 @@
       </el-card>
 
       <el-card class="form-panel" header="2. 确认并入库">
-        <el-form :model="form" label-width="80px">
-          <el-form-item label="景点名称">
-            <el-input v-model="form.name" />
+        <el-form :model="form" label-width="90px">
+          <el-form-item label="景点名称 *">
+            <el-input v-model="form.name" placeholder="必填" />
           </el-form-item>
-          <el-form-item label="所属城市">
-            <el-select v-model="form.city" style="width: 100%">
-              <el-option value="上海" label="上海" />
-              <el-option value="北京" label="北京" />
-              <el-option value="其他" label="其他" />
-            </el-select>
+
+          <el-row :gutter="20">
+            <el-col :span="12">
+              <el-form-item label="城市">
+                <el-input v-model="form.city" placeholder="如：北京" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="门票">
+                <el-input-number v-model="form.ticketPrice" :min="0" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <el-form-item label="详细地址 *">
+            <el-input v-model="form.address" type="textarea" :rows="2" placeholder="必填，用于地图定位" />
           </el-form-item>
-          <el-form-item label="门票价格">
-            <el-input-number v-model="form.ticketPrice" :min="0" />
-          </el-form-item>
+
+          <el-row :gutter="20">
+            <el-col :span="12">
+              <el-form-item label="纬度 (Lat)">
+                <el-input v-model="form.latitude" placeholder="39.90" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="经度 (Lng)">
+                <el-input v-model="form.longitude" placeholder="116.40" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
           <el-form-item label="开放时间">
             <el-input v-model="form.openTime" />
           </el-form-item>
+
           <el-form-item label="景点介绍">
             <el-input v-model="form.description" type="textarea" :rows="4" />
           </el-form-item>
 
-          <el-form-item label="景点封面">
+          <el-form-item label="封面图片">
             <el-upload
                 class="avatar-uploader"
                 action="http://localhost:8080/upload"
@@ -70,7 +93,7 @@
 import { ref, reactive } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import { MagicStick, Plus } from '@element-plus/icons-vue' // 引入图标
+import { MagicStick, Plus } from '@element-plus/icons-vue'
 
 const rawText = ref('')
 const analyzing = ref(false)
@@ -78,81 +101,90 @@ const submitting = ref(false)
 
 const form = reactive({
   name: '',
-  city: '上海',
+  city: '',
+  address: '', // 🔥 必须有这个字段
+  latitude: '',
+  longitude: '',
   ticketPrice: 0,
   openTime: '',
   description: '',
-  imageUrl: '' // 默认为空，等待上传或AI填入
+  imageUrl: ''
 })
 
-// 1. 调用 AI 解析文本
+// 1. 调用 AI 解析
 const analyzeText = async () => {
-  if (!rawText.value || rawText.value.length < 10) return ElMessage.warning('请先粘贴一段足够长的文本')
+  if (!rawText.value || rawText.value.length < 5) return ElMessage.warning('请先粘贴文本')
 
   analyzing.value = true
   try {
     const res = await axios.post('http://localhost:8080/ai/parse', { text: rawText.value })
     if (res.data.code === '200') {
-      const data = JSON.parse(res.data.data) // 解析 AI 返回的 JSON 字符串
+      const data = JSON.parse(res.data.data)
 
-      // 自动填表
+      // 🔥 修复：将 AI 返回的所有字段都映射到 form
       form.name = data.name || ''
-      form.city = data.city || '上海'
+      form.city = data.city || ''
+      form.address = data.address || '' // 关键修复
       form.ticketPrice = data.ticketPrice || 0
       form.openTime = data.openTime || '全天'
       form.description = data.description || ''
-      // 注意：AI 解析不出图片URL，图片通常需要人工上传
 
-      ElMessage.success('AI 解析成功！请手动上传图片后保存')
+      // 如果 AI 返回了坐标，也填进去
+      if(data.latitude) form.latitude = data.latitude
+      if(data.longitude) form.longitude = data.longitude
+
+      ElMessage.success('AI 解析成功，请核对信息')
     } else {
-      ElMessage.error('AI 解析失败: ' + res.data.msg)
+      ElMessage.error('解析失败: ' + res.data.msg)
     }
   } catch (e) {
-    console.error(e)
-    ElMessage.error('解析出错，请检查后端 AI 接口')
+    ElMessage.error('AI 接口调用出错')
   } finally {
     analyzing.value = false
   }
 }
 
-// 2. 保存到数据库
+// 2. 保存入库
 const submitToDb = async () => {
-  if (!form.name) return ElMessage.warning('名称不能为空')
+  // 手动校验
+  if (!form.name) return ElMessage.warning('名称必填')
+  if (!form.address) return ElMessage.warning('地址必填 (AI没提取到请手动填写)')
+
+  // 经纬度检查 (为了地图功能)
+  if(!form.latitude || !form.longitude) {
+    ElMessage.warning('提示：未填写经纬度，地图上将无法显示此景点')
+  }
 
   submitting.value = true
   try {
     const payload = {
       ...form,
-      contentText: form.description, // 确保 AI RAG 可用
-      rating: 5.0
+      contentText: form.description,
+      rating: 4.8, // 默认评分
+      isHot: 0
     }
-
     const res = await axios.post('http://localhost:8080/attraction/add', payload)
 
     if (res.data.code === '200') {
-      ElMessage.success(`🎉 成功！景点【${form.name}】已正式上线！`)
-      // 清空表单
-      form.name = ''
-      form.description = ''
+      ElMessage.success('入库成功！')
+      // 重置表单
+      Object.keys(form).forEach(key => form[key] = '')
       form.ticketPrice = 0
-      form.openTime = ''
-      form.imageUrl = ''
       rawText.value = ''
     } else {
-      ElMessage.error('入库失败: ' + res.data.msg)
+      ElMessage.error(res.data.msg)
     }
   } catch (e) {
-    console.error(e)
-    ElMessage.error('网络错误')
+    ElMessage.error('提交失败')
   } finally {
     submitting.value = false
   }
 }
 
-// --- 图片上传相关逻辑 ---
+// 图片上传
 const handleUploadSuccess = (res) => {
   if (res.code === '200') {
-    form.imageUrl = res.data // 后端返回的是完整URL
+    form.imageUrl = res.data
     ElMessage.success('图片上传成功')
   } else {
     ElMessage.error('上传失败')
@@ -160,11 +192,9 @@ const handleUploadSuccess = (res) => {
 }
 
 const beforeUpload = (rawFile) => {
-  if (rawFile.type !== 'image/jpeg' && rawFile.type !== 'image/png') {
-    ElMessage.error('图片必须是 JPG 或 PNG 格式!')
-    return false
-  } else if (rawFile.size / 1024 / 1024 > 5) {
-    ElMessage.error('图片大小不能超过 5MB!')
+  // 🔥 放宽限制到 10MB
+  if (rawFile.size / 1024 / 1024 > 10) {
+    ElMessage.error('图片不能超过 10MB!')
     return false
   }
   return true
@@ -172,28 +202,22 @@ const beforeUpload = (rawFile) => {
 </script>
 
 <style scoped>
-.ai-add-page { max-width: 1100px; margin: 0 auto; }
-.page-header { margin-bottom: 20px; }
-.tip { color: #666; font-size: 14px; }
-.workspace { display: flex; gap: 20px; }
-.input-panel, .form-panel { flex: 1; }
+.ai-add-page { max-width: 1200px; margin: 20px auto; padding: 0 20px; }
+.workspace { display: flex; gap: 20px; margin-top: 20px; }
+.input-panel { flex: 1; }
+.form-panel { flex: 1.2; }
 .btn-area { margin-top: 15px; display: flex; gap: 10px; }
 .w-100 { width: 100%; margin-top: 20px; }
 
-/* 上传组件样式 */
 .avatar-uploader .el-upload {
   border: 1px dashed #d9d9d9;
   border-radius: 6px;
   cursor: pointer;
   position: relative;
   overflow: hidden;
-  transition: var(--el-transition-duration-fast);
+  transition: .3s;
 }
 .avatar-uploader .el-upload:hover { border-color: #409EFF; }
-.avatar-uploader-icon {
-  font-size: 28px; color: #8c939d;
-  width: 100px; height: 100px;
-  text-align: center; line-height: 100px;
-}
-.avatar { width: 100px; height: 100px; display: block; object-fit: cover; }
+.avatar-uploader-icon { font-size: 28px; color: #8c939d; width: 120px; height: 120px; text-align: center; line-height: 120px; }
+.avatar { width: 120px; height: 120px; display: block; object-fit: cover; }
 </style>
