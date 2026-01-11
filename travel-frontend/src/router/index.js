@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import Home from '../views/Home.vue'
 import Login from '../views/Login.vue'
 import Detail from '../views/Detail.vue'
-import Profile from '../views/Profile.vue'
+import Itinerary from '../views/Itinerary.vue'
 import Community from '../views/Community.vue'
 import Plan from '../views/Plan.vue'
 // 后台页面
@@ -21,14 +21,14 @@ const routes = [
     { path: '/', component: Home },
     { path: '/login', component: Login },
     { path: '/detail/:id', component: Detail },
-    { path: '/profile', component: Profile },
+    { path: '/profile', component: () => import('../views/Profile.vue')},
     { path: '/community', component: Community },
     { path: '/plan', component: Plan },
     // 🔥 注册详情页
     { path: '/post/:id', component: PostDetail },
     // 新增支付页路由
     { path: '/payment', component: Payment },
-
+    { path: '/itinerary', component: () => import('../views/Itinerary.vue') },
     // --- 后台路由 ---
     {
         path: '/admin',

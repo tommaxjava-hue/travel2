@@ -2,6 +2,7 @@
   <div class="home-page">
     <div class="hero-wrapper">
       <div class="hero-bg" style="background-image: url('https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?ixlib=rb-1.2.1&auto=format&fit=crop&w=1920&q=80');"></div>
+
       <div class="hero-overlay">
         <h1 class="slogan">AI 智启旅程，发现世界之美</h1>
 
@@ -83,19 +84,21 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, watch, computed } from 'vue' // 引入 computed
+import { ref, onMounted, nextTick, watch, computed } from 'vue'
 import axios from 'axios'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Star } from '@element-plus/icons-vue'
 
+const router = useRouter()
 const currentUser = JSON.parse(localStorage.getItem('user') || '{}')
-const spotList = ref([]) // 所有数据
+const spotList = ref([])
 const loading = ref(false)
 const keyword = ref('')
 
-// 🔥 分页相关变量
+// 分页变量
 const currentPage = ref(1)
-const pageSize = ref(12) // 每页显示12个
+const pageSize = ref(12)
 
 const aiVisible = ref(false)
 const aiQuestion = ref('')
@@ -105,7 +108,6 @@ const chatBox = ref(null)
 
 const FALLBACK_IMG = 'https://images.unsplash.com/photo-1596394516093-501ba68a0ba6?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80'
 
-// 🔥 计算属性：当前页需要显示的数据
 const paginatedSpots = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
   const end = start + pageSize.value
@@ -116,7 +118,6 @@ const handleImgError = (e) => {
   e.target.src = FALLBACK_IMG
 }
 
-// 监听搜索框回退
 watch(keyword, (newVal) => {
   if (!newVal) loadSpots()
 })
@@ -129,15 +130,13 @@ const loadSpots = async () => {
     })
     if(res.data.code === '200') {
       spotList.value = res.data.data
-      currentPage.value = 1 // 搜索或刷新后重置为第一页
+      currentPage.value = 1
     }
   } finally { loading.value = false }
 }
 
-// 🔥 分页事件处理
 const handlePageChange = (val) => {
   currentPage.value = val
-  // 滚动到列表顶部，提升体验
   document.getElementById('spot-list-anchor').scrollIntoView({ behavior: 'smooth' })
 }
 
@@ -146,43 +145,34 @@ const handleSizeChange = (val) => {
   currentPage.value = 1
 }
 
-// 🔥 修复版：流式对话 (带响应式修复)
 const sendAiStream = () => {
   if (!aiQuestion.value) return
   const q = aiQuestion.value
 
-  // 1. 添加用户提问
   chatHistory.value.push({ role: 'user', content: q })
   aiQuestion.value = ''
-  aiLoading.value = true // 显示思考中
+  aiLoading.value = true
 
   nextTick(() => { if(chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight })
 
-  // 2. 建立 SSE 连接
   const eventSource = new EventSource(`http://localhost:8080/ai/stream/ask?question=${encodeURIComponent(q)}&userId=${currentUser.userId || ''}`)
 
-  // 3. 准备接收数据
-  let currentAiMsg = null // 用于引用数组中的响应式对象
+  let currentAiMsg = null
 
   eventSource.onopen = () => {
-    console.log('SSE 连接成功')
     aiLoading.value = false
-    // 🔥 关键修改：将对象推入数组，然后获取它的引用！
     chatHistory.value.push({ role: 'ai', content: '' })
     currentAiMsg = chatHistory.value[chatHistory.value.length - 1]
   }
 
   eventSource.onmessage = (e) => {
-    // 🔥 关键修改：修改引用对象，触发 Vue 更新
     if (currentAiMsg) {
       currentAiMsg.content += e.data
-      // 自动滚动
       nextTick(() => { if(chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight })
     }
   }
 
-  eventSource.onerror = (err) => {
-    console.error('SSE 连接错误:', err)
+  eventSource.onerror = () => {
     eventSource.close()
     aiLoading.value = false
     if (currentAiMsg && !currentAiMsg.content) {
@@ -214,6 +204,8 @@ onMounted(() => loadSpots())
 .hero-overlay { position: relative; z-index: 2; text-align: center; color: white; width: 100%; max-width: 800px; }
 .slogan { font-size: 42px; margin-bottom: 30px; letter-spacing: 2px; text-shadow: 0 4px 10px rgba(0,0,0,0.5); font-weight: 800; }
 
+/* nav-bar 样式已删除，现在由 App.vue 接管 */
+
 .big-search-box { display: flex; background: rgba(255,255,255,0.25); backdrop-filter: blur(10px); padding: 5px; border-radius: 50px; border: 1px solid rgba(255,255,255,0.3); box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
 .big-search-box input { flex: 1; border: none; font-size: 16px; padding: 12px 25px; outline: none; background: transparent; color: white; }
 .big-search-box input::placeholder { color: rgba(255,255,255,0.9); }
@@ -238,7 +230,6 @@ onMounted(() => loadSpots())
 .c-meta { display: flex; justify-content: space-between; align-items: center; color: #666; font-size: 13px; }
 .price { color: #ff9d00; font-weight: bold; font-size: 16px; }
 
-/* 分页样式 */
 .pagination-box { margin-top: 40px; display: flex; justify-content: center; }
 
 .ai-float { position: fixed; bottom: 30px; right: 30px; width: 60px; height: 60px; background: #409EFF; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 30px; box-shadow: 0 5px 20px rgba(64,158,255,0.4); cursor: pointer; z-index: 100; transition: transform 0.2s; }

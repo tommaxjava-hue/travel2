@@ -18,6 +18,8 @@ public class UserController {
     @Autowired
     private IUserService userService;
 
+    // ================= 原有功能区域 =================
+
     // 1. 用户登录
     @PostMapping("/login")
     public Result<SysUser> login(@RequestBody SysUser user) {
@@ -38,6 +40,8 @@ public class UserController {
         // 如果你有验证码逻辑，请在此处保留。这里提供基础注册逻辑。
         String username = (String) params.get("username");
         String password = (String) params.get("password");
+        // 处理注册时的标签 (如果前端传了tags)
+        String tags = (String) params.get("tags");
 
         if (username == null || password == null) return Result.error("400", "请输入用户名和密码");
 
@@ -51,6 +55,9 @@ public class UserController {
         user.setUsername(username);
         user.setPassword(password);
         user.setRole("user"); // 默认角色
+        if (tags != null) {
+            user.setTags(tags);
+        }
         userService.save(user);
 
         return Result.success("注册成功");
@@ -104,5 +111,36 @@ public class UserController {
         target.setRole(newRole);
         userService.updateById(target);
         return Result.success("权限修改成功");
+    }
+
+    // ================= 新增功能区域 (个人中心) =================
+
+    // 6. 获取最新用户信息 (刷新页面用)
+    @GetMapping("/info")
+    public Result<SysUser> getUserInfo(@RequestParam Long userId) {
+        SysUser user = userService.getById(userId);
+        if (user != null) {
+            user.setPassword(null); //不仅是个好习惯，更是安全保障
+            return Result.success(user);
+        }
+        return Result.error("404", "用户不存在");
+    }
+
+    // 7. 更新用户信息 (头像、昵称、密码、标签等)
+    @PostMapping("/update")
+    public Result<SysUser> updateUserInfo(@RequestBody SysUser user) {
+        if (user.getUserId() == null) {
+            return Result.error("400", "用户ID不能为空");
+        }
+
+        // 简单校验
+        boolean success = userService.updateById(user);
+        if (success) {
+            // 返回更新后的最新数据
+            SysUser newUser = userService.getById(user.getUserId());
+            newUser.setPassword(null);
+            return Result.success(newUser);
+        }
+        return Result.error("500", "更新失败");
     }
 }
