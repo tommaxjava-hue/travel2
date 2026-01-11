@@ -1,19 +1,24 @@
 <template>
   <div class="app-wrapper">
-    <div class="nav-bar-wrapper" v-if="$route.path !== '/login'">
-      <div class="nav-bar-content">
+    <div
+        v-if="$route.path !== '/login'"
+        class="nav-bar"
+        :class="{ 'nav-home': $route.path === '/', 'nav-common': $route.path !== '/' }"
+    >
+      <div class="nav-content">
         <div class="logo" @click="$router.push('/')">✈️ 智能旅游</div>
 
         <div class="nav-links">
           <span @click="$router.push('/')" :class="{ active: $route.path === '/' }">首页</span>
+          <span @click="$router.push('/plan')" :class="{ active: $route.path === '/plan' }">智能规划</span>
           <span @click="$router.push('/itinerary')" :class="{ active: $route.path === '/itinerary' }">我的行程</span>
-          <span @click="$router.push('/community')" :class="{ active: $route.path.startsWith('/community') || $route.path.startsWith('/post') }">攻略社区</span>
+          <span @click="$router.push('/community')" :class="{ active: $route.path.startsWith('/community') }">攻略社区</span>
         </div>
 
         <div class="user-area">
           <template v-if="user">
             <el-dropdown>
-              <span class="el-dropdown-link user-profile">
+              <span class="user-profile-link">
                 <el-avatar :size="32" :src="user.avatar || 'https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png'" />
                 <span class="username">{{ user.name || user.username }}</span>
               </span>
@@ -52,14 +57,11 @@ const logout = () => {
   router.push('/login')
 }
 
-// 监听 storage 变化，确保多标签页或登录跳转时状态实时更新
+// 监听 storage 变化，确保登录状态实时同步
 onMounted(() => {
-  // 1. 监听原生 storage 事件 (多标签页同步)
   window.addEventListener('storage', () => {
     user.value = JSON.parse(localStorage.getItem('user') || 'null')
   })
-
-  // 2. 轮询兜底 (解决同一页面 localStorage 变化有时不触发 storage 事件的问题)
   setInterval(() => {
     const newUser = JSON.parse(localStorage.getItem('user') || 'null')
     if (JSON.stringify(newUser) !== JSON.stringify(user.value)) {
@@ -70,43 +72,69 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* 全局导航容器 */
-.nav-bar-wrapper {
-  width: 100%; height: 64px; background: #fff;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-  position: sticky; top: 0; z-index: 999;
+/* --- 导航栏基础样式 --- */
+.nav-bar {
+  width: 100%;
+  height: 64px;
+  z-index: 999;
+  transition: all 0.3s ease;
 }
 
-.nav-bar-content {
-  max-width: 1200px; margin: 0 auto; height: 100%;
-  display: flex; align-items: center; justify-content: space-between;
+.nav-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 0 20px;
 }
 
-/* Logo */
-.logo {
-  font-size: 24px; font-weight: 900; color: #409EFF;
-  cursor: pointer; transition: 0.3s;
+/* --- 模式A：首页透明风格 (nav-home) --- */
+.nav-home {
+  position: absolute; /* 悬浮在背景图之上 */
+  top: 0;
+  left: 0;
+  background: transparent;
+  color: white;
+  box-shadow: none;
 }
-.logo:hover { transform: scale(1.05); }
+.nav-home .logo { color: white; }
+.nav-home .nav-links span { color: rgba(255,255,255,0.9); }
+.nav-home .nav-links span:hover,
+.nav-home .nav-links span.active { color: #fff; font-weight: 800; }
+.nav-home .username { color: white; }
 
-/* 中间链接 - 移植自 Home 风格，适配白底 */
+/* --- 模式B：普通页白底风格 (nav-common) --- */
+.nav-common {
+  position: sticky; /* 固定在顶部 */
+  top: 0;
+  background: #fff;
+  color: #333;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+}
+.nav-common .logo { color: #409EFF; }
+.nav-common .nav-links span { color: #555; }
+.nav-common .nav-links span:hover,
+.nav-common .nav-links span.active { color: #409EFF; }
+.nav-common .username { color: #333; }
+
+/* --- 通用元素样式 --- */
+.logo { font-size: 24px; font-weight: 900; cursor: pointer; }
+
 .nav-links { display: flex; align-items: center; }
 .nav-links span {
-  margin: 0 20px; font-size: 16px; font-weight: bold; color: #555;
-  cursor: pointer; transition: 0.3s; position: relative;
-}
-.nav-links span:hover { color: #409EFF; }
-.nav-links span.active { color: #409EFF; }
-/* 激活状态下的小横条 */
-.nav-links span.active::after {
-  content: ''; position: absolute; bottom: -5px; left: 0; width: 100%; height: 2px; background: #409EFF; border-radius: 2px;
+  margin: 0 20px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: 0.3s;
+  position: relative;
 }
 
-/* 用户区域 */
 .user-area { display: flex; align-items: center; }
-.user-profile { display: flex; align-items: center; cursor: pointer; outline: none; }
-.username { margin-left: 8px; font-weight: bold; color: #333; font-size: 14px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-profile-link { display: flex; align-items: center; cursor: pointer; outline: none; }
+.username { margin-left: 8px; font-weight: bold; font-size: 14px; }
 
-.main-view { width: 100%; min-height: calc(100vh - 64px); background-color: #f5f7fa; }
+.main-view { width: 100%; min-height: calc(100vh - 64px); }
 </style>

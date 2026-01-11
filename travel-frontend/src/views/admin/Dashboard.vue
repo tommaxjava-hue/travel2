@@ -3,18 +3,26 @@
     <div class="card-row">
       <el-card class="data-card" shadow="hover">
         <template #header>👥 今日日活 (DAU)</template>
-        <div class="num">1,208</div>
-        <div class="trend up">较昨日 +15% 📈</div>
+        <div class="num">{{ stats.dau }}</div>
+        <div class="trend up">实时数据 🟢</div>
       </el-card>
+
       <el-card class="data-card" shadow="hover">
         <template #header>📝 累计攻略数</template>
-        <div class="num">8,542</div>
-        <div class="trend">本周新增 120 篇</div>
+        <div class="num">{{ stats.postCount }}</div>
+        <div class="trend">社区活跃内容</div>
       </el-card>
+
       <el-card class="data-card" shadow="hover">
-        <template #header>🤖 AI 调用次数</template>
-        <div class="num">45,291</div>
-        <div class="trend up">高频使用 🔥</div>
+        <template #header>🏔️ 收录景点</template>
+        <div class="num">{{ stats.spotCount }}</div>
+        <div class="trend">平台核心资源</div>
+      </el-card>
+
+      <el-card class="data-card" shadow="hover">
+        <template #header>👤 注册用户</template>
+        <div class="num">{{ stats.userCount }}</div>
+        <div class="trend">持续增长中 📈</div>
       </el-card>
     </div>
 
@@ -30,14 +38,39 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, reactive } from 'vue'
 import * as echarts from 'echarts'
+import axios from 'axios' // 🔥 引入 axios
+
+// 🔥 定义响应式数据对象，初始值为 0
+const stats = reactive({
+  dau: 0,
+  postCount: 0,
+  spotCount: 0,
+  userCount: 0
+})
 
 const lineChart = ref(null)
 const pieChart = ref(null)
 
-onMounted(() => {
-  // 1. 折线图
+// 🔥 加载后台数据的方法
+const loadData = async () => {
+  try {
+    const res = await axios.get('http://localhost:8080/admin/stats')
+    if (res.data.code === '200') {
+      // 将接口返回的数据覆盖到 stats 对象
+      Object.assign(stats, res.data.data)
+    }
+  } catch (e) {
+    console.error('获取看板数据失败', e)
+  }
+}
+
+onMounted(async () => {
+  // 1. 页面加载时先去后台查数据
+  await loadData()
+
+  // 2. 初始化图表
   const myLine = echarts.init(lineChart.value)
   myLine.setOption({
     title: { text: '近七日用户访问量趋势' },
@@ -47,7 +80,6 @@ onMounted(() => {
     series: [{ data: [820, 932, 901, 934, 1290, 1330, 1320], type: 'line', smooth: true, areaStyle: {} }]
   })
 
-  // 2. 饼图
   const myPie = echarts.init(pieChart.value)
   myPie.setOption({
     title: { text: '热门搜索景点占比' },
@@ -69,6 +101,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.dashboard { padding: 20px; }
 .card-row { display: flex; gap: 20px; margin-bottom: 20px; }
 .data-card { flex: 1; text-align: center; }
 .num { font-size: 32px; font-weight: bold; color: #409EFF; margin: 10px 0; }

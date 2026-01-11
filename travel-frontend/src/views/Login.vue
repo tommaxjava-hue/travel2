@@ -12,6 +12,10 @@
             <el-form-item>
               <el-input v-model="loginForm.password" type="password" placeholder="密码" prefix-icon="Lock" show-password />
             </el-form-item>
+            <el-form-item class="captcha-row">
+              <el-input v-model="regForm.verifyCode" placeholder="验证码" style="width: 140px;" />
+              <img :src="captchaImg" class="captcha-img" @click="refreshCaptcha" title="点击刷新" />
+            </el-form-item>
             <el-button type="primary" class="w-100" @click="handleLogin" :loading="loading">立即登录</el-button>
           </el-form>
         </el-tab-pane>
