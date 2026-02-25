@@ -11,14 +11,14 @@
         </el-table-column>
         <el-table-column label="权限操作" width="200">
           <template #default="scope">
-            <div v-if="currentUser.userId === 1">
+            <div v-if="currentUser.userId === 88">
               <el-button
                   v-if="scope.row.role === 'user'"
                   type="warning" size="small"
                   @click="changeRole(scope.row, 'admin')"
               >提拔</el-button>
               <el-button
-                  v-else-if="scope.row.role === 'admin' && scope.row.userId !== 1"
+                  v-else-if="scope.row.role === 'admin' && scope.row.userId !== 88"
                   type="info" size="small"
                   @click="changeRole(scope.row, 'user')"
               >降级</el-button>

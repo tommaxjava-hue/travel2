@@ -7,6 +7,7 @@ import com.example.travelaibackend.service.IUserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate; // 🔥 1. 新增导入
 import org.springframework.web.bind.annotation.*;
+import cn.hutool.crypto.digest.BCrypt;
 
 import java.time.LocalDate; // 🔥 2. 新增导入
 import java.util.List;
@@ -36,7 +37,9 @@ public class UserController {
 
         if (dbUser == null) return Result.error("401", "用户不存在");
         if ("BANNED".equals(dbUser.getPassword())) return Result.error("403", "该账号已被封禁");
-        if (!dbUser.getPassword().equals(user.getPassword())) return Result.error("401", "密码错误");
+        if (!BCrypt.checkpw(user.getPassword(), dbUser.getPassword())) {
+            return Result.error("401", "密码错误");
+        }
 
         // 🔥 5. 【新增】记录日活 (DAU) 逻辑
         try {
@@ -71,7 +74,8 @@ public class UserController {
 
         SysUser user = new SysUser();
         user.setUsername(username);
-        user.setPassword(password);
+        String hashedPassword = BCrypt.hashpw(password, BCrypt.gensalt());
+        user.setPassword(hashedPassword);
         user.setRole("user"); // 默认角色
         if (tags != null) {
             user.setTags(tags);
@@ -114,11 +118,11 @@ public class UserController {
 
         if (operatorId == null || targetUserId == null) return Result.error("400", "参数错误");
 
-        if (operatorId != 1) {
+        if (operatorId != 88) {
             return Result.error("403", "无权操作，只有超级管理员(ID=1)可变更权限");
         }
 
-        if (targetUserId == 1) {
+        if (targetUserId == 88) {
             return Result.error("403", "不能修改超级管理员的权限");
         }
 
