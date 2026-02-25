@@ -1,238 +1,462 @@
 <template>
   <div class="spot-manage">
-    <el-card header="🏔️ 景点数据管理">
-      <div class="filter-bar">
-        <el-input
-            v-model="keyword"
-            placeholder="搜索景点名称 / 城市..."
-            style="width: 300px"
-            clearable
-            @clear="loadData"
-            @keyup.enter="loadData"
-        >
-          <template #append><el-button @click="loadData">搜索</el-button></template>
-        </el-input>
-        <el-button type="primary" style="margin-left:10px" @click="loadData">刷新列表</el-button>
-      </div>
+    <el-card class="box-card" shadow="hover">
+      <template #header>
+        <div class="card-header">
+          <span>🗺️ 企业级景点资源库</span>
+          <div class="header-actions">
+            <el-input
+                v-model="searchQuery.keyword"
+                placeholder="搜索景点/标签..."
+                style="width: 200px; margin-right: 12px;"
+                clearable
+                @keyup.enter="fetchData"
+            />
+            <el-input
+                v-model="searchQuery.city"
+                placeholder="城市筛选..."
+                style="width: 150px; margin-right: 12px;"
+                clearable
+                @keyup.enter="fetchData"
+            />
+            <el-button type="primary" @click="fetchData" :loading="loading">
+              <el-icon><Search /></el-icon> 检索
+            </el-button>
+            <el-button type="success" @click="openAddDialog" :disabled="!isSuperAdmin">
+              <el-icon><Plus /></el-icon> 新增景点
+            </el-button>
+          </div>
+        </div>
+      </template>
 
-      <el-table :data="tableData" stripe style="width: 100%; margin-top: 20px" v-loading="loading">
-        <el-table-column prop="spotId" label="ID" width="80" />
+      <el-table :data="paginatedData" v-loading="loading" border stripe highlight-current-row style="width: 100%">
+        <el-table-column prop="spotId" label="ID" width="70" align="center" />
 
-        <el-table-column label="封面图" width="120">
-          <template #default="{row}">
+        <el-table-column label="主图" width="100" align="center">
+          <template #default="scope">
             <el-image
-                :src="row.imageUrl"
-                style="width: 80px; height: 50px; border-radius: 4px"
+                :src="scope.row.imageUrl || FALLBACK_IMG"
+                :preview-src-list="[scope.row.imageUrl || FALLBACK_IMG]"
                 fit="cover"
-                :preview-src-list="[row.imageUrl]"
+                class="table-img"
                 preview-teleported
             >
               <template #error>
-                <div class="image-slot">无图</div>
+                <div class="image-slot">
+                  <el-icon><icon-picture /></el-icon>
+                </div>
               </template>
             </el-image>
           </template>
         </el-table-column>
 
-        <el-table-column prop="name" label="景点名称" width="180" show-overflow-tooltip />
-        <el-table-column prop="city" label="城市" width="100" />
-        <el-table-column prop="address" label="详细地址" show-overflow-tooltip />
-        <el-table-column prop="ticketPrice" label="票价" width="100">
-          <template #default="{row}">¥{{ row.ticketPrice }}</template>
+        <el-table-column prop="name" label="景点名称" min-width="150" show-overflow-tooltip>
+          <template #default="scope">
+            <strong>{{ scope.row.name }}</strong>
+          </template>
         </el-table-column>
 
-        <el-table-column label="热门置顶" width="100">
-          <template #default="{row}">
+        <el-table-column prop="city" label="城市" width="100" align="center" />
+
+        <el-table-column prop="ticketPrice" label="门票(元)" width="100" align="center">
+          <template #default="scope">
+            <span class="price-text">¥{{ scope.row.ticketPrice }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="rating" label="星级" width="80" align="center">
+          <template #default="scope">
+            <span style="color: #e6a23c; font-weight: bold;">{{ scope.row.rating }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="isHot" label="热门推荐" width="100" align="center">
+          <template #default="scope">
             <el-switch
-                v-model="row.isHot"
+                v-model="scope.row.isHot"
                 :active-value="1"
                 :inactive-value="0"
-                @change="handleToggleHot(row)"
+                :disabled="!isSuperAdmin"
+                @change="handleToggleHot(scope.row)"
             />
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="180" fixed="right">
-          <template #default="{row}">
-            <el-button type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-            <el-button type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+        <el-table-column label="高危操作" width="180" fixed="right" align="center">
+          <template #default="scope">
+            <el-button size="small" type="primary" plain @click="openEditDialog(scope.row)" :disabled="!isSuperAdmin">
+              编辑
+            </el-button>
+            <el-button size="small" type="danger" plain @click="handleDelete(scope.row)" :disabled="!isSuperAdmin">
+              删除
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="pagination-container">
+        <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            :page-sizes="[10, 20, 50]"
+            layout="total, sizes, prev, pager, next, jumper"
+            :total="total"
+            background
+        />
+      </div>
     </el-card>
 
-    <el-dialog v-model="showEdit" title="修改景点详情" width="650px" destroy-on-close>
-      <el-form :model="editForm" label-width="90px">
-        <el-form-item label="景点名称">
-          <el-input v-model="editForm.name" />
+    <el-dialog :title="dialogTitle" v-model="dialogVisible" width="750px" destroy-on-close :close-on-click-modal="false" top="5vh">
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="110px" class="spot-form">
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="景点名称" prop="name">
+              <el-input v-model="form.name" placeholder="请输入核心景观名称" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="所在城市" prop="city">
+              <el-input v-model="form.city" placeholder="如: 北京" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-form-item label="景点主图" prop="imageUrl" class="upload-form-item">
+          <div class="upload-container">
+            <el-radio-group v-model="uploadMode" size="small" style="margin-bottom: 12px;">
+              <el-radio-button label="url">🔗 外部链接</el-radio-button>
+              <el-radio-button label="file">📁 本地上传</el-radio-button>
+            </el-radio-group>
+
+            <div class="upload-content">
+              <el-input
+                  v-if="uploadMode === 'url'"
+                  v-model="form.imageUrl"
+                  placeholder="请输入可访问的公网图片 URL (如 https://...)"
+                  clearable
+              >
+                <template #prepend>HTTPS://</template>
+              </el-input>
+
+              <el-upload
+                  v-if="uploadMode === 'file'"
+                  class="image-uploader"
+                  action="http://localhost:8080/file/upload"
+                  :show-file-list="false"
+                  :headers="uploadHeaders"
+                  :on-success="handleUploadSuccess"
+                  :before-upload="beforeUpload"
+                  accept=".jpg,.jpeg,.png,.gif,.webp"
+              >
+                <img v-if="form.imageUrl && uploadMode === 'file'" :src="form.imageUrl" class="avatar" />
+                <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
+                <template #tip>
+                  <div class="el-upload__tip">只能上传 jpg/png 文件，且不超过 5MB</div>
+                </template>
+              </el-upload>
+
+              <transition name="el-fade-in">
+                <div v-if="form.imageUrl && uploadMode === 'url'" class="url-preview">
+                  <span class="preview-label">预览：</span>
+                  <el-image
+                      :src="form.imageUrl"
+                      fit="cover"
+                      class="preview-img"
+                      :preview-src-list="[form.imageUrl]"
+                  >
+                    <template #error>
+                      <div class="image-slot">
+                        <el-icon><icon-picture /></el-icon> 加载失败
+                      </div>
+                    </template>
+                  </el-image>
+                </div>
+              </transition>
+            </div>
+          </div>
+        </el-form-item>
+        <el-form-item label="详细地址" prop="address">
+          <el-input v-model="form.address" placeholder="请输入精确的导航地址" />
         </el-form-item>
 
         <el-row :gutter="20">
           <el-col :span="12">
-            <el-form-item label="所属城市">
-              <el-input v-model="editForm.city" />
+            <el-form-item label="门票价格" prop="ticketPrice">
+              <el-input-number v-model="form.ticketPrice" :min="0" :precision="2" :step="10" class="w-100" :controls="false">
+                <template #prefix>￥</template>
+              </el-input-number>
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="门票价格">
-              <el-input-number v-model="editForm.ticketPrice" :min="0" style="width: 100%" />
+            <el-form-item label="推荐星级" prop="rating">
+              <el-rate v-model="form.rating" allow-half show-score text-color="#ff9900" />
             </el-form-item>
           </el-col>
         </el-row>
 
-        <el-form-item label="详细地址">
-          <el-input v-model="editForm.address" />
-        </el-form-item>
-
-        <el-row :gutter="20" style="background: #fdf6ec; padding: 10px 0; border-radius: 4px; margin-bottom: 18px;">
+        <el-row :gutter="20">
           <el-col :span="12">
-            <el-form-item label="经度 (Lng)">
-              <el-input v-model="editForm.longitude" placeholder="如 116.4074" />
+            <el-form-item label="经度(Lng)" prop="longitude">
+              <el-input v-model="form.longitude" placeholder="建议使用高德地图坐标拾取器" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="纬度 (Lat)">
-              <el-input v-model="editForm.latitude" placeholder="如 39.9042" />
+            <el-form-item label="纬度(Lat)" prop="latitude">
+              <el-input v-model="form.latitude" placeholder="建议使用高德地图坐标拾取器" />
             </el-form-item>
           </el-col>
-          <div style="width:100%; text-align:center; font-size:12px; color:#e6a23c;">
-            * 经纬度为空会导致行程规划地图无法显示轨迹
-          </div>
         </el-row>
 
-        <el-form-item label="景点介绍">
-          <el-input v-model="editForm.description" type="textarea" :rows="4" />
+        <el-form-item label="特色标签" prop="tags">
+          <el-input v-model="form.tags" placeholder="使用英文逗号分隔，如: 5A景区,亲子,避暑" />
         </el-form-item>
 
-        <el-form-item label="封面图片">
-          <el-upload
-              class="avatar-uploader"
-              action="http://localhost:8080/upload"
-              :show-file-list="false"
-              :on-success="handleEditUploadSuccess"
-          >
-            <img v-if="editForm.imageUrl" :src="editForm.imageUrl" class="avatar" />
-            <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
-          </el-upload>
+        <el-form-item label="图文介绍" prop="description">
+          <el-input
+              v-model="form.description"
+              type="textarea"
+              :rows="5"
+              placeholder="请输入吸引游客的详细文案，支持简单的 HTML 标签..."
+              maxlength="2000"
+              show-word-limit
+          />
         </el-form-item>
       </el-form>
+
       <template #footer>
-        <el-button @click="showEdit = false">取消</el-button>
-        <el-button type="primary" @click="submitEdit">保存修改</el-button>
+        <span class="dialog-footer">
+          <el-button @click="dialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="submitForm" :loading="submitLoading">确认提交</el-button>
+        </span>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import axios from 'axios'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Search, Plus, Picture as IconPicture } from '@element-plus/icons-vue'
+import request from '../../utils/request'
 
+// 全局常量与用户信息
+const FALLBACK_IMG = 'https://images.unsplash.com/photo-1596394516093-501ba68a0ba6?ixlib=rb-1.2.1&auto=format&fit=crop&w=150&q=80'
+const currentUser = JSON.parse(localStorage.getItem('user') || '{}')
+const token = localStorage.getItem('token') // 获取本地 Token
+
+// 【核心鉴权】ID=88 铁律
+const isSuperAdmin = computed(() => currentUser.userId === 88)
+
+// 上传相关配置
+const uploadMode = ref('url') // 'url' | 'file'
+// 手动构造上传请求头，携带 Token
+const uploadHeaders = computed(() => ({
+  Authorization: token ? `Bearer ${token}` : ''
+}))
+
+// 状态定义
 const tableData = ref([])
 const loading = ref(false)
-const keyword = ref('')
-const showEdit = ref(false)
-const editForm = reactive({})
+const searchQuery = reactive({ keyword: '', city: '' })
 
-const loadData = async () => {
+// 分页状态
+const currentPage = ref(1)
+const pageSize = ref(10)
+const total = computed(() => tableData.value.length)
+
+// 前端分页计算
+const paginatedData = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return tableData.value.slice(start, start + pageSize.value)
+})
+
+// 弹窗表单
+const dialogVisible = ref(false)
+const submitLoading = ref(false)
+const dialogTitle = ref('新增景点')
+const formRef = ref(null)
+
+const form = reactive({
+  spotId: null,
+  name: '',
+  city: '',
+  address: '',
+  ticketPrice: 0,
+  rating: 4.5,
+  longitude: '',
+  latitude: '',
+  imageUrl: '',
+  tags: '',
+  description: ''
+})
+
+const rules = {
+  name: [{ required: true, message: '景观名称绝不可为空', trigger: 'blur' }],
+  imageUrl: [{ required: true, message: '请上传图片或输入链接', trigger: 'change' }],
+  ticketPrice: [{ required: true, message: '必须设定票价', trigger: 'blur' }],
+}
+
+// 获取数据
+const fetchData = async () => {
   loading.value = true
   try {
-    const res = await axios.get('http://localhost:8080/attraction/list', {
-      params: { keyword: keyword.value }
+    const res = await request.get('/attraction/list', {
+      params: { ...searchQuery }
     })
-    if (res.data.code === '200') {
-      tableData.value = res.data.data
+    if (res.code === '200') {
+      tableData.value = res.data || []
+      currentPage.value = 1
     }
-  } catch(e) {
-    ElMessage.error('加载失败')
   } finally {
     loading.value = false
   }
 }
 
+// 切换热门
 const handleToggleHot = async (row) => {
+  if (!isSuperAdmin.value) return
   try {
-    await axios.post('http://localhost:8080/attraction/toggleHot', row)
-    ElMessage.success('热门状态已更新')
-  } catch(e) {
+    const res = await request.post('/attraction/toggleHot', { spotId: row.spotId })
+    if (res.code !== '200') row.isHot = row.isHot === 1 ? 0 : 1
+    else ElMessage.success('热门状态已更新')
+  } catch (error) {
     row.isHot = row.isHot === 1 ? 0 : 1
-    ElMessage.error('操作失败')
   }
 }
 
-const openEdit = (row) => {
-  Object.assign(editForm, JSON.parse(JSON.stringify(row)))
-  showEdit.value = true
+// 弹窗操作
+const openAddDialog = () => {
+  dialogTitle.value = '➕ 录入新景点'
+  resetForm()
+  uploadMode.value = 'file' // 新增默认使用文件上传
+  dialogVisible.value = true
 }
 
-const submitEdit = async () => {
-  if (!editForm.latitude || !editForm.longitude) {
-    ElMessage.warning('为了地图功能正常，请务必填写经纬度！')
-  }
+const openEditDialog = (row) => {
+  dialogTitle.value = '✏️ 编辑景点档案'
+  Object.assign(form, JSON.parse(JSON.stringify(row)))
+  // 智能判断：如果原图片是本地上传的地址，自动切到文件模式，否则切到 URL 模式
+  uploadMode.value = form.imageUrl && form.imageUrl.includes('/files/') ? 'file' : 'url'
+  dialogVisible.value = true
+}
 
-  try {
-    const res = await axios.post('http://localhost:8080/attraction/update', editForm)
-    if (res.data.code === '200') {
-      ElMessage.success('修改成功')
-      showEdit.value = false
-      loadData()
-    } else {
-      ElMessage.error(res.data.msg || '修改失败')
-    }
-  } catch(e) {
-    ElMessage.error('网络错误')
+const resetForm = () => {
+  if (formRef.value) formRef.value.resetFields()
+  Object.keys(form).forEach(key => form[key] = '')
+  form.spotId = null
+  form.ticketPrice = 0
+  form.rating = 4.5
+}
+
+// ================= 上传回调处理 =================
+const handleUploadSuccess = (res) => {
+  if (res.code === '200') {
+    form.imageUrl = res.data // 将后端返回的 URL 填入表单
+    ElMessage.success('图片上传成功')
+    formRef.value.clearValidate('imageUrl') // 清除校验报错
+  } else {
+    ElMessage.error(res.msg || '上传失败')
   }
 }
 
-const handleDelete = (row) => {
-  ElMessageBox.confirm(`确定要删除【${row.name}】吗？此操作不可恢复。`, '警告', {
-    type: 'warning',
-    confirmButtonText: '确定删除',
-    cancelButtonText: '取消'
-  }).then(async () => {
-    try {
-      const res = await axios.delete(`http://localhost:8080/attraction/delete/${row.spotId}`)
-      if (res.data.code === '200') {
-        ElMessage.success('已删除')
-        loadData()
-      } else {
-        ElMessage.error(res.data.msg)
+const beforeUpload = (file) => {
+  const isImg = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)
+  const isLt5M = file.size / 1024 / 1024 < 5
+
+  if (!isImg) ElMessage.error('上传图片只能是 JPG/PNG/GIF/WEBP 格式!')
+  if (!isLt5M) ElMessage.error('上传图片大小不能超过 5MB!')
+  return isImg && isLt5M
+}
+// ===============================================
+
+// 提交表单
+const submitForm = () => {
+  formRef.value.validate(async (valid) => {
+    if (valid) {
+      submitLoading.value = true
+      try {
+        const url = form.spotId ? '/attraction/update' : '/attraction/add'
+        const res = await request.post(url, form)
+        if (res.code === '200') {
+          ElMessage.success(form.spotId ? '档案更新完毕' : '新景点录入成功')
+          dialogVisible.value = false
+          fetchData()
+        }
+      } finally {
+        submitLoading.value = false
       }
-    } catch(e) {
-      ElMessage.error('删除失败')
     }
   })
 }
 
-const handleEditUploadSuccess = (res) => {
-  if (res.code === '200') {
-    editForm.imageUrl = res.data
-    ElMessage.success('图片上传成功')
-  } else {
-    ElMessage.error('图片上传失败')
-  }
+// 删除
+const handleDelete = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+        `确定要销毁 <strong>${row.name}</strong> 吗？`, '⚠️ 高危警报',
+        { confirmButtonText: '销毁', cancelButtonText: '取消', type: 'error', dangerouslyUseHTMLString: true }
+    )
+    const res = await request.delete(`/attraction/delete/${row.spotId}`)
+    if (res.code === '200') {
+      ElMessage.success('数据已销毁')
+      fetchData()
+    }
+  } catch (e) { /* cancel */ }
 }
 
-onMounted(loadData)
+onMounted(fetchData)
 </script>
 
 <style scoped>
-.spot-manage { padding: 0; }
-.filter-bar { display: flex; align-items: center; margin-bottom: 20px; }
+.spot-manage {
+  padding: 24px;
+  background-color: #f0f2f5;
+  min-height: calc(100vh - 60px);
+}
+.box-card { border-radius: 8px; }
+.card-header { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 16px; color: #303133; }
+.header-actions { display: flex; align-items: center; }
+.table-img { width: 60px; height: 60px; border-radius: 8px; border: 1px solid #ebeef5; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+.price-text { color: #f56c6c; font-weight: 700; font-size: 15px; }
+.pagination-container { margin-top: 20px; display: flex; justify-content: flex-end; }
+.w-100 { width: 100%; }
 
-.avatar-uploader .el-upload {
+/* 上传组件样式优化 */
+.upload-container {
+  background-color: #f8f9fa;
+  padding: 15px;
+  border-radius: 8px;
+  border: 1px dashed #dcdfe6;
+  transition: all 0.3s;
+}
+.upload-container:hover { border-color: #409eff; }
+.image-uploader .el-upload {
   border: 1px dashed #d9d9d9;
   border-radius: 6px;
   cursor: pointer;
   position: relative;
   overflow: hidden;
-  transition: .3s;
+  transition: var(--el-transition-duration-fast);
 }
-.avatar-uploader .el-upload:hover { border-color: #409EFF; }
-.avatar-uploader-icon { font-size: 28px; color: #8c939d; width: 120px; height: 120px; text-align: center; line-height: 120px; }
+.image-uploader .el-upload:hover { border-color: var(--el-color-primary); }
+.avatar-uploader-icon {
+  font-size: 28px;
+  color: #8c939d;
+  width: 120px;
+  height: 120px;
+  text-align: center;
+  line-height: 120px;
+}
 .avatar { width: 120px; height: 120px; display: block; object-fit: cover; }
-
-.image-slot { display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; background: #f5f7fa; color: #909399; font-size: 12px; }
+.url-preview {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  background: #fff;
+  padding: 8px;
+  border-radius: 4px;
+}
+.preview-label { font-size: 12px; color: #909399; margin-right: 8px; }
+.preview-img { width: 60px; height: 60px; border-radius: 4px; border: 1px solid #eee; }
+.image-slot { display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; background: #f5f7fa; color: #909399; font-size: 14px; }
 </style>

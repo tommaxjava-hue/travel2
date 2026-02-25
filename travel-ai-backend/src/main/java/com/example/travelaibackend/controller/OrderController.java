@@ -1,9 +1,13 @@
 package com.example.travelaibackend.controller;
 
 import com.example.travelaibackend.common.Result;
+import com.example.travelaibackend.common.ResultCode;
+import com.example.travelaibackend.dto.OrderCreateDTO;
+import com.example.travelaibackend.service.IOrderService;
+import com.example.travelaibackend.utils.UserContext;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
+import javax.validation.Valid;
 import java.util.Map;
 
 @RestController
@@ -12,27 +16,31 @@ import java.util.Map;
 public class OrderController {
 
     @Autowired
-    private JdbcTemplate jdbcTemplate;
+    private IOrderService orderService;
 
     @PostMapping("/create")
-    public Result<Long> createOrder(@RequestBody Map<String, Object> params) {
-        Integer userId = (Integer) params.get("userId");
-        Integer spotId = (Integer) params.get("spotId");
-        String spotName = (String) params.get("spotName");
-        Double price = Double.valueOf(params.get("price").toString());
-
-        jdbcTemplate.update("INSERT INTO sys_order (user_id, spot_id, spot_name, price, status, create_time) VALUES (?,?,?,?,'UNPAID',NOW())",
-                userId, spotId, spotName, price);
-
-        Long id = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
-        return Result.success(id);
+    public Result<Long> createOrder(@Valid @RequestBody OrderCreateDTO dto) {
+        Long userId = UserContext.getUserId();
+        if (userId == null) {
+            return Result.error(ResultCode.UNAUTHORIZED);
+        }
+        Long orderId = orderService.createOrder(dto, userId);
+        return Result.success(orderId);
     }
 
     @PostMapping("/pay")
     public Result<?> payOrder(@RequestBody Map<String, Object> params) {
-        // 这里可以加简单的 Token 校验
-        Integer orderId = Integer.valueOf(params.get("orderId").toString());
-        jdbcTemplate.update("UPDATE sys_order SET status = 'PAID' WHERE order_id = ?", orderId);
+        Long userId = UserContext.getUserId();
+        if (userId == null) {
+            return Result.error(ResultCode.UNAUTHORIZED);
+        }
+
+        Integer orderIdObj = (Integer) params.get("orderId");
+        if (orderIdObj == null) {
+            return Result.error(ResultCode.VALIDATE_FAILED.getCode(), "订单ID不能为空");
+        }
+
+        orderService.payOrder(orderIdObj.longValue(), userId);
         return Result.success("支付成功");
     }
 }

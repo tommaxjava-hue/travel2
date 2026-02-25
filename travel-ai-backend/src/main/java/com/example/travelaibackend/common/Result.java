@@ -4,26 +4,40 @@ import lombok.Data;
 
 @Data
 public class Result<T> {
-    private String code; // 200成功, 其他失败
-    private String msg;  // 提示信息
-    private T data;      // 返回的数据
+    private String code;
+    private String msg;
+    private T data;
 
-    // 成功的静态方法
-    public static <T> Result<T> success(T data) {
-        Result<T> result = new Result<>();
-        result.setCode("200");
-        result.setMsg("操作成功");
-        result.setData(data);
-        return result;
+    protected Result() {
     }
 
-    // 失败的静态方法
-    // 修改重点：这里加了 <T>，并且返回值改成了 Result<T>
-    // 这样它就能根据需要，自动变成 Result<Attraction> 或 Result<User> 等任何类型
+    protected Result(String code, String msg, T data) {
+        this.code = code;
+        this.msg = msg;
+        this.data = data;
+    }
+
+    public static <T> Result<T> success(T data) {
+        return new Result<>(ResultCode.SUCCESS.getCode(), ResultCode.SUCCESS.getMessage(), data);
+    }
+
+    public static <T> Result<T> success(T data, String message) {
+        return new Result<>(ResultCode.SUCCESS.getCode(), message, data);
+    }
+
+    public static <T> Result<T> success() {
+        return new Result<>(ResultCode.SUCCESS.getCode(), ResultCode.SUCCESS.getMessage(), null);
+    }
+
+    public static <T> Result<T> error(ResultCode errorCode) {
+        return new Result<>(errorCode.getCode(), errorCode.getMessage(), null);
+    }
+
     public static <T> Result<T> error(String code, String msg) {
-        Result<T> result = new Result<>();
-        result.setCode(code);
-        result.setMsg(msg);
-        return result;
+        return new Result<>(code, msg, null);
+    }
+
+    public static <T> Result<T> error(String msg) {
+        return new Result<>(ResultCode.FAILED.getCode(), msg, null);
     }
 }

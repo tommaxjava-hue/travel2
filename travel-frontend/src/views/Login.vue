@@ -10,10 +10,10 @@
               <el-input v-model="loginForm.username" placeholder="用户名" prefix-icon="User" />
             </el-form-item>
             <el-form-item>
-              <el-input v-model="loginForm.password" type="password" placeholder="密码" prefix-icon="Lock" show-password />
+              <el-input v-model="loginForm.password" type="password" placeholder="密码" prefix-icon="Lock" show-password @keyup.enter="handleLogin" />
             </el-form-item>
             <el-form-item class="captcha-row">
-              <el-input v-model="regForm.verifyCode" placeholder="验证码" style="width: 140px;" />
+              <el-input v-model="loginForm.verifyCode" placeholder="验证码" style="width: 140px;" @keyup.enter="handleLogin" />
               <img :src="captchaImg" class="captcha-img" @click="refreshCaptcha" title="点击刷新" />
             </el-form-item>
             <el-button type="primary" class="w-100" @click="handleLogin" :loading="loading">立即登录</el-button>
@@ -54,73 +54,97 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import axios from 'axios'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
+// 企业级改造：使用封装好的 request 对象
+import request from '../utils/request'
 
 const router = useRouter()
 const activeTab = ref('login')
 const loading = ref(false)
 
-const loginForm = reactive({ username: '', password: '' })
-// 整合 regForm：既有验证码字段，又有后续处理需要的标签逻辑
+// 修复：为登录表单增加验证码字段
+const loginForm = reactive({ username: '', password: '', verifyCode: '', verifyKey: '' })
 const regForm = reactive({ username: '', password: '', verifyCode: '', verifyKey: '' })
-const selectedTags = ref([]) // 选中的标签
+const selectedTags = ref([])
 const captchaImg = ref('')
 
-// 获取验证码 (保留旧功能)
+// 获取验证码 (改用 request)
 const refreshCaptcha = async () => {
   try {
-    const res = await axios.get('http://localhost:8080/captcha/image')
-    if (res.data.code === '200') {
-      regForm.verifyKey = res.data.data.key
-      captchaImg.value = res.data.data.image // Base64直接展示
+    const res = await request.get('/captcha/image')
+    if (res.code === '200') {
+      // 同时更新登录和注册表单的 verifyKey
+      regForm.verifyKey = res.data.key
+      loginForm.verifyKey = res.data.key
+      captchaImg.value = res.data.image
     }
-  } catch(e) { console.error(e) }
+  } catch(e) {
+    console.error(e)
+  }
 }
 
 const handleLogin = async () => {
-  if (!loginForm.username || !loginForm.password) return ElMessage.warning('请输入完整')
+  if (!loginForm.username || !loginForm.password || !loginForm.verifyCode) {
+    return ElMessage.warning('请输入完整信息(含验证码)')
+  }
   loading.value = true
   try {
-    const res = await axios.post('http://localhost:8080/user/login', loginForm)
-    if (res.data.code === '200') {
-      localStorage.setItem('user', JSON.stringify(res.data.data))
+    const res = await request.post('/user/login', loginForm)
+    if (res.code === '200') {
+      // 企业级修复：正确存储 Token 和 擦除敏感信息后的 User 对象
+      localStorage.setItem('token', res.data.token)
+      localStorage.setItem('user', JSON.stringify(res.data.userInfo))
       ElMessage.success('登录成功')
-      router.push('/')
+
+      if (res.data.userInfo.role === 'admin') {
+        router.push('/admin/dashboard')
+      } else {
+        router.push('/')
+      }
     } else {
-      ElMessage.error(res.data.msg)
+      // 失败后自动刷新验证码
+      refreshCaptcha()
+      loginForm.verifyCode = ''
     }
-  } catch(e) { ElMessage.error('网络错误') }
-  finally { loading.value = false }
+  } catch(e) {
+    console.error(e)
+    refreshCaptcha()
+  } finally {
+    loading.value = false
+  }
 }
 
 const handleRegister = async () => {
-  // 校验整合：既要校验账号密码，也要校验验证码
-  if (!regForm.username || !regForm.password || !regForm.verifyCode) return ElMessage.warning('请填写完整')
+  if (!regForm.username || !regForm.password || !regForm.verifyCode) {
+    return ElMessage.warning('请填写完整')
+  }
 
   loading.value = true
   try {
-    // 拼接标签
     const tagsStr = selectedTags.value.join(',')
 
-    // 发送请求：包含验证码参数 + 标签参数
-    const res = await axios.post('http://localhost:8080/user/register', {
+    const res = await request.post('/user/register', {
       ...regForm,
       tags: tagsStr
     })
 
-    if (res.data.code === '200') {
+    if (res.code === '200') {
       ElMessage.success('注册成功，请登录')
       activeTab.value = 'login'
       loginForm.username = regForm.username
+      refreshCaptcha() // 注册成功切回登录时，顺便刷新一下验证码
     } else {
-      ElMessage.error(res.data.msg)
-      refreshCaptcha() // 失败刷新验证码
+      refreshCaptcha()
+      regForm.verifyCode = ''
     }
-  } catch(e) { ElMessage.error('注册失败') }
-  finally { loading.value = false }
+  } catch(e) {
+    console.error(e)
+    refreshCaptcha()
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(() => {

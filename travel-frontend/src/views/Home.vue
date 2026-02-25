@@ -18,25 +18,46 @@
         <h2>🔥 热门推荐 <span class="ph-sub" v-if="currentUser.tags"> (专属推荐: {{currentUser.tags}})</span></h2>
       </div>
 
-      <div class="spot-grid-layout" v-loading="loading">
-        <div v-for="spot in paginatedSpots" :key="spot.spotId" class="spot-card" @click="$router.push(`/detail/${spot.spotId}`)">
-          <div class="card-img">
-            <img
-                :src="spot.imageUrl"
-                loading="lazy"
-                @error="handleImgError"
-            />
-            <div class="rating-badge">★ {{ spot.rating }}</div>
-          </div>
-          <div class="card-info">
-            <div class="c-title">{{ spot.name }}</div>
-            <div class="c-meta">
-              <span>📍 {{ spot.city }}</span>
-              <span class="price">¥{{ spot.ticketPrice }}</span>
+      <el-skeleton style="width: 100%" :loading="loading" animated>
+        <template #template>
+          <div class="spot-grid-layout">
+            <div v-for="i in 12" :key="i" class="spot-card">
+              <div class="card-img">
+                <el-skeleton-item variant="image" style="width: 100%; height: 180px;" />
+              </div>
+              <div class="card-info" style="padding: 15px;">
+                <el-skeleton-item variant="h3" style="width: 60%; margin-bottom: 8px;" />
+                <div class="c-meta" style="display: flex; justify-content: space-between;">
+                  <el-skeleton-item variant="text" style="width: 35%;" />
+                  <el-skeleton-item variant="text" style="width: 25%;" />
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        </template>
+
+        <template #default>
+          <div class="spot-grid-layout">
+            <div v-for="spot in paginatedSpots" :key="spot.spotId" class="spot-card" @click="$router.push(`/detail/${spot.spotId}`)">
+              <div class="card-img">
+                <img
+                    :src="spot.imageUrl"
+                    loading="lazy"
+                    @error="handleImgError"
+                />
+                <div class="rating-badge">★ {{ spot.rating }}</div>
+              </div>
+              <div class="card-info">
+                <div class="c-title">{{ spot.name }}</div>
+                <div class="c-meta">
+                  <span>📍 {{ spot.city }}</span>
+                  <span class="price">¥{{ spot.ticketPrice }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </el-skeleton>
 
       <el-empty v-if="spotList.length === 0 && !loading" description="暂无相关景点，试试搜索其他城市" />
 
@@ -85,7 +106,8 @@
 
 <script setup>
 import { ref, onMounted, nextTick, watch, computed } from 'vue'
-import axios from 'axios'
+// 企业级改造：替换原生 axios，引入带有自动 Token 注入和全局异常拦截的 request
+import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Star } from '@element-plus/icons-vue'
@@ -125,14 +147,17 @@ watch(keyword, (newVal) => {
 const loadSpots = async () => {
   loading.value = true
   try {
-    const res = await axios.get('http://localhost:8080/attraction/list', {
-      params: { userId: currentUser.userId, keyword: keyword.value }
+    // 企业级改造：使用封装好的 request 对象，响应体会自动解包，同时后端通过 Token 自动识别用户
+    const res = await request.get('/attraction/list', {
+      params: { keyword: keyword.value }
     })
-    if(res.data.code === '200') {
-      spotList.value = res.data.data
+    if(res.code === '200') {
+      spotList.value = res.data
       currentPage.value = 1
     }
-  } finally { loading.value = false }
+  } finally {
+    loading.value = false
+  }
 }
 
 const handlePageChange = (val) => {
@@ -155,6 +180,7 @@ const sendAiStream = () => {
 
   nextTick(() => { if(chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight })
 
+  // EventSource 依然保持，后端对于非敏感流式接口并未强制要求 Header Token 拦截
   const eventSource = new EventSource(`http://localhost:8080/ai/stream/ask?question=${encodeURIComponent(q)}&userId=${currentUser.userId || ''}`)
 
   let currentAiMsg = null
@@ -184,27 +210,31 @@ const sendAiStream = () => {
 const saveAiNote = async (content) => {
   if (!currentUser.userId) return ElMessage.warning('请先登录')
   try {
-    const res = await axios.post('http://localhost:8080/ai/saveItinerary', {
+    // 企业级改造：使用 request 发送，统一处理 401 和异常错误
+    const res = await request.post('/ai/saveItinerary', {
       userId: currentUser.userId,
       content: content
     })
-    if (res.data.code === '200') ElMessage.success('已保存到【我的行程计划】')
-    else ElMessage.error(res.data.msg)
-  } catch(e) { ElMessage.error('保存失败') }
+    if (res.code === '200') {
+      ElMessage.success('已保存到【我的行程计划】')
+    }
+  } catch(e) {
+    // 错误已经由 request.js 全局拦截并提示，此处无需额外处理
+    console.error(e)
+  }
 }
 
 onMounted(() => loadSpots())
 </script>
 
 <style scoped>
+/* 样式部分完全保留原版设计 */
 .home-page { min-height: 100vh; background-color: #f5f7fa; }
 .hero-wrapper { position: relative; height: 450px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .hero-bg { position: absolute; width: 100%; height: 100%; background-size: cover; background-position: center; filter: brightness(0.7); transition: transform 3s; }
 .hero-wrapper:hover .hero-bg { transform: scale(1.05); }
 .hero-overlay { position: relative; z-index: 2; text-align: center; color: white; width: 100%; max-width: 800px; }
 .slogan { font-size: 42px; margin-bottom: 30px; letter-spacing: 2px; text-shadow: 0 4px 10px rgba(0,0,0,0.5); font-weight: 800; }
-
-/* nav-bar 样式已删除，现在由 App.vue 接管 */
 
 .big-search-box { display: flex; background: rgba(255,255,255,0.25); backdrop-filter: blur(10px); padding: 5px; border-radius: 50px; border: 1px solid rgba(255,255,255,0.3); box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
 .big-search-box input { flex: 1; border: none; font-size: 16px; padding: 12px 25px; outline: none; background: transparent; color: white; }
