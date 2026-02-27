@@ -3,7 +3,7 @@
     <el-card class="box-card" shadow="hover">
       <template #header>
         <div class="card-header">
-          <span>📝 企业级内容与舆情监控 (最高统帅专属)</span>
+          <span>📝 内容与舆情监控 (管理员可用)</span>
           <el-button type="primary" plain size="small" @click="loadData" :loading="loading">
             <el-icon><Refresh /></el-icon> 刷新数据
           </el-button>
@@ -45,7 +45,7 @@
                     type="danger"
                     size="small"
                     @click="delPost(scope.row)"
-                    :disabled="!isSuperAdmin"
+                    :disabled="!isAdmin"
                 >
                   删除
                 </el-button>
@@ -96,7 +96,7 @@
                     type="danger"
                     size="small"
                     @click="delComment(scope.row)"
-                    :disabled="!isSuperAdmin"
+                    :disabled="!isAdmin"
                 >
                   删除
                 </el-button>
@@ -124,12 +124,11 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Search, User, Timer } from '@element-plus/icons-vue'
-// 企业级改造：接入统一的 request 拦截器
 import request from '../../utils/request'
 
-// 全局权限判定：最高统帅必须为 ID = 88
+// 全局权限判定：最高统帅(88) 或 普通管理员(role='admin') 均可操作
 const currentUser = JSON.parse(localStorage.getItem('user') || '{}')
-const isSuperAdmin = computed(() => currentUser.userId === 88)
+const isAdmin = computed(() => currentUser.role === 'admin' || currentUser.userId === 88)
 
 // 数据源与加载状态
 const posts = ref([])
@@ -177,7 +176,6 @@ const paginatedComments = computed(() => {
 const loadData = async () => {
   loading.value = true
   try {
-    // 利用 Promise.all 并发请求，提升页面渲染速度
     const [resPost, resComment] = await Promise.all([
       request.get('/post/list'),
       request.get('/comment/all')

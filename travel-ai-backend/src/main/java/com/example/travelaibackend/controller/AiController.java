@@ -107,4 +107,10 @@ public class AiController {
             return Result.error("500", "保存失败");
         }
     }
+    // 6. 新增功能：异步拉取景点的 AI 智能口碑总结
+    @GetMapping("/summary/{spotId}")
+    public Result<String> getSpotSummary(@PathVariable Integer spotId) {
+        String summary = aiService.generateSpotSummary(spotId);
+        return Result.success(summary);
+    }
 }

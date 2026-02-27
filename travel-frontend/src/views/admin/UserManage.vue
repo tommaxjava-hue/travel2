@@ -3,7 +3,7 @@
     <el-card class="box-card" shadow="hover">
       <template #header>
         <div class="card-header">
-          <span>👥 企业级用户管理 (最高统帅专属)</span>
+          <span>👥 用户管理 (最高统帅专属)</span>
           <el-button type="primary" plain size="small" @click="fetchUsers" :loading="loading">
             <el-icon><Refresh /></el-icon> 刷新数据
           </el-button>

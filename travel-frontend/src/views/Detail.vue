@@ -68,17 +68,21 @@
           </div>
         </div>
 
-        <div class="ai-summary-card" v-if="aiSummary">
-          <div class="ai-header">
-            <span class="ai-icon">✨</span>
-            <span class="ai-title">AI 智能口碑总结</span>
-            <el-tag size="small" type="warning" effect="plain" style="margin-left: 10px">基于真实评论分析</el-tag>
-          </div>
+        <el-card class="ai-summary-card" shadow="hover" v-loading="aiLoading" element-loading-text="AI大模型正在深度分析全网评价...">
+          <template #header>
+            <div class="ai-header">
+              <div class="title-with-icon">
+                <el-icon class="ai-icon"><MagicStick /></el-icon>
+                <span class="gradient-text">AI 智能口碑总结</span>
+              </div>
+              <el-tag type="primary" effect="light" round size="small">大模型驱动</el-tag>
+            </div>
+          </template>
           <div class="ai-content">
-            {{ aiSummary }}
+            <div v-if="aiSummary" class="ai-text" v-html="aiSummary.replace(/\n/g, '<br>')"></div>
+            <el-empty v-else-if="!aiLoading" description="暂无足够数据供AI分析" :image-size="60" />
           </div>
-        </div>
-
+        </el-card>
         <div class="section-block">
           <h3>📖 景点介绍</h3>
           <p class="long-text">{{ spot.contentText || spot.description }}</p>
@@ -128,19 +132,21 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import axios from 'axios'
+// 企业级改造：替换原生 axios，使用全局 request 进行 Token 自动拦截
+import request from '../utils/request'
 import { ElMessage } from 'element-plus'
-import { Star, StarFilled, EditPen, Share } from '@element-plus/icons-vue'
+import { Star, StarFilled, EditPen, Share, MagicStick } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
-const spotId = route.params.id
+const spotId = route.params.id || route.query.id
 const currentUser = JSON.parse(localStorage.getItem('user') || '{}')
 
 const loading = ref(false)
 const spot = ref(null)
 const comments = ref([])
 const aiSummary = ref('') // AI 摘要
+const aiLoading = ref(false) // 专门控制 AI 卡片的加载动画
 const isFav = ref(false)  // 收藏状态
 
 const newComment = reactive({ score: 5, content: '' })
@@ -150,44 +156,57 @@ const init = async () => {
   loading.value = true
   try {
     // 1. 获取详情
-    const res1 = await axios.get(`http://localhost:8080/attraction/detail/${spotId}`)
-    spot.value = res1.data.data
+    const res1 = await request.get(`/attraction/detail/${spotId}`)
+    if (res1.code === '200') {
+      spot.value = res1.data
+    }
 
     // 2. 获取评论
     loadComments()
 
     // 3. 检查是否收藏 (需登录)
     if (currentUser.userId) {
-      const res3 = await axios.get(`http://localhost:8080/favorite/check`, {
+      const res3 = await request.get(`/favorite/check`, {
         params: { userId: currentUser.userId, spotId: spotId }
       })
-      isFav.value = res3.data.data
+      if (res3.code === '200') {
+        isFav.value = res3.data
+      }
     }
 
     // 4. 获取 AI 摘要
     loadAiSummary()
 
   } catch (e) {
-    console.error(e)
-    ElMessage.error('加载详情失败')
+    console.error('初始化失败:', e)
   } finally {
     loading.value = false
   }
 }
 
 const loadComments = async () => {
-  const res = await axios.get(`http://localhost:8080/comment/list?spotId=${spotId}`)
-  comments.value = res.data.data
+  try {
+    const res = await request.get(`/comment/list?spotId=${spotId}`)
+    if (res.code === '200') {
+      comments.value = res.data || []
+    }
+  } catch (e) {
+    console.error('评论加载失败:', e)
+  }
 }
 
 const loadAiSummary = async () => {
+  aiLoading.value = true
   try {
-    const res = await axios.get(`http://localhost:8080/ai/summary?spotId=${spotId}`)
-    if (res.data.code === '200') {
-      aiSummary.value = res.data.data
+    // 适配后端最新的 RESTful 接口路径
+    const res = await request.get(`/ai/summary/${spotId}`)
+    if (res.code === '200') {
+      aiSummary.value = res.data
     }
   } catch (e) {
-    console.log('AI 摘要加载跳过')
+    console.log('AI 摘要拉取异常，跳过渲染')
+  } finally {
+    aiLoading.value = false
   }
 }
 
@@ -196,21 +215,21 @@ const toggleFav = async () => {
   if (!currentUser.userId) return ElMessage.warning('请先登录后收藏')
 
   try {
-    const res = await axios.post(`http://localhost:8080/favorite/toggle`, {
+    const res = await request.post(`/favorite/toggle`, {
       userId: currentUser.userId,
       spotId: spotId
     })
 
-    if (res.data.code === '200') {
+    if (res.code === '200') {
       isFav.value = !isFav.value
       ElMessage.success(isFav.value ? '已添加到收藏夹' : '已取消收藏')
     }
   } catch(e) {
-    ElMessage.error('操作失败')
+    console.error('收藏失败:', e)
   }
 }
 
-// 🔥 核心修改：预订功能
+// 预订功能
 const bookTicket = async () => {
   if (!currentUser.userId) {
     ElMessage.warning('请先登录')
@@ -218,21 +237,18 @@ const bookTicket = async () => {
   }
 
   try {
-    const res = await axios.post('http://localhost:8080/order/create', {
-      userId: currentUser.userId,
+    const res = await request.post('/order/create', {
       spotId: spot.value.spotId,
       spotName: spot.value.name,
       price: spot.value.ticketPrice
     })
 
-    if (res.data.code === '200') {
+    if (res.code === '200') {
       // 跳转支付页
-      router.push(`/payment?orderId=${res.data.data}&price=${spot.value.ticketPrice}`)
-    } else {
-      ElMessage.error(res.data.msg)
+      router.push(`/payment?orderId=${res.data}&price=${spot.value.ticketPrice}`)
     }
   } catch(e) {
-    ElMessage.error('创建订单失败')
+    console.error('预订失败:', e)
   }
 }
 
@@ -241,22 +257,20 @@ const submitComment = async () => {
   if (!newComment.content) return ElMessage.warning('评论内容不能为空')
 
   try {
-    const res = await axios.post('http://localhost:8080/comment/add', {
+    const res = await request.post('/comment/add', {
       spotId,
       content: newComment.content,
       score: newComment.score,
       userId: currentUser.userId || 1
     })
 
-    if (res.data.code === '200') {
+    if (res.code === '200') {
       ElMessage.success('评论发布成功！')
       newComment.content = ''
-      loadComments()
-    } else {
-      ElMessage.error(res.data.msg)
+      loadComments() // 发布后立刻刷新评论区
     }
   } catch (e) {
-    ElMessage.error('评论失败，请检查网络')
+    console.error('发布评论失败:', e)
   }
 }
 
@@ -265,7 +279,9 @@ const scrollToComment = () => {
 }
 const formatTime = (t) => t ? t.replace('T', ' ').substring(0, 16) : ''
 
-onMounted(init)
+onMounted(() => {
+  init()
+})
 </script>
 
 <style scoped>
@@ -275,7 +291,7 @@ onMounted(init)
 
 .content-wrapper { background: white; border-radius: 16px; padding: 40px; box-shadow: 0 8px 30px rgba(0,0,0,0.04); }
 
-/* 顶部区域 */
+/* 顶部区域 (保留原样) */
 .top-section { display: flex; gap: 40px; margin-bottom: 40px; }
 .img-box { flex: 1; height: 360px; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
 .img-box img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.5s; }
@@ -289,7 +305,7 @@ onMounted(init)
 .meta-row { display: flex; align-items: center; gap: 15px; margin-bottom: 25px; }
 .views { color: #999; font-size: 13px; }
 
-/* 价格卡片样式优化 */
+/* 价格卡片样式优化 (保留原样) */
 .price-card { background: #f8fbfd; border: 1px solid #eef6fc; padding: 15px 20px; border-radius: 10px; margin-bottom: 25px; display: flex; align-items: center; justify-content: space-between; }
 .price-left { display: flex; align-items: center; }
 .price-card .label { color: #666; margin-right: 15px; }
@@ -301,24 +317,49 @@ onMounted(init)
 .desc-box { color: #555; line-height: 1.6; margin-bottom: 30px; flex: 1; font-size: 15px; }
 .action-row { display: flex; gap: 15px; }
 
-/* AI 摘要卡片 */
+/* ================= AI 卡片专属炫酷样式 ================= */
 .ai-summary-card {
-  background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
-  border-radius: 12px; padding: 20px 25px; margin-bottom: 40px;
-  position: relative; overflow: hidden;
-  box-shadow: 0 4px 15px rgba(33, 150, 243, 0.15);
+  margin-bottom: 25px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background-image: linear-gradient(#fff, #fff), linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.05);
 }
-.ai-summary-card::before {
-  content: '"'; position: absolute; right: 20px; top: 0px; font-size: 100px; color: rgba(255,255,255,0.4); font-family: serif; pointer-events: none;
+.ai-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
-.ai-header { display: flex; align-items: center; margin-bottom: 12px; }
-.ai-icon { font-size: 22px; margin-right: 8px; animation: pulse 2s infinite; }
-.ai-title { font-weight: 800; color: #1565c0; font-size: 16px; letter-spacing: 0.5px; }
-.ai-content { color: #0d47a1; font-size: 15px; line-height: 1.7; text-align: justify; font-weight: 500; }
+.title-with-icon {
+  display: flex;
+  align-items: center;
+  font-size: 18px;
+  font-weight: bold;
+}
+.ai-icon {
+  font-size: 22px;
+  color: #e83e8c;
+  margin-right: 8px;
+}
+.gradient-text {
+  background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.ai-content {
+  padding: 10px 5px;
+}
+.ai-text {
+  font-size: 15px;
+  line-height: 1.8;
+  color: #333;
+  letter-spacing: 0.5px;
+}
+/* ====================================================== */
 
-@keyframes pulse { 0% {transform: scale(1);} 50% {transform: scale(1.1);} 100% {transform: scale(1);} }
-
-/* 介绍与评论 */
+/* 介绍与评论 (保留原样) */
 .section-block { margin-top: 40px; padding-top: 30px; border-top: 1px dashed #eee; }
 .section-block h3 { border-left: 5px solid #409EFF; padding-left: 12px; font-size: 20px; margin-bottom: 20px; }
 .long-text {
@@ -330,7 +371,7 @@ onMounted(init)
   height: auto;
 }
 
-/* 评论区样式 */
+/* 评论区样式 (保留原样) */
 .post-comment { background: #f9fafc; padding: 20px; border-radius: 10px; margin-bottom: 30px; border: 1px solid #f0f0f0; }
 .post-actions { display: flex; align-items: center; margin-top: 15px; }
 .rate-label { margin-right: 10px; color: #666; }
