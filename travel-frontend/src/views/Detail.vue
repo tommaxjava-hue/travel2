@@ -32,10 +32,11 @@
 
             <div class="meta-row">
               <el-tag type="success" effect="dark">{{ spot.city }}</el-tag>
+              <el-tag type="info" effect="plain" v-if="spot.openTime">🈺 {{ spot.openTime }}</el-tag>
               <div class="rate-box">
                 <el-rate v-model="spot.rating" disabled text-color="#ff9900" show-score />
               </div>
-              <span class="views">🔥 热度 {{ spot.viewCount || 8848 }}</span>
+              <span class="views">🔥 热度 {{ spot.viewCount || Math.floor(Math.random() * 500) + 100 }}</span>
             </div>
 
             <div class="price-card">
@@ -83,6 +84,12 @@
             <el-empty v-else-if="!aiLoading" description="暂无足够数据供AI分析" :image-size="60" />
           </div>
         </el-card>
+
+        <div class="section-block map-section">
+          <h3>🗺️ 精准地图位置</h3>
+          <div id="leaflet-map" class="map-container"></div>
+        </div>
+
         <div class="section-block">
           <h3>📖 景点介绍</h3>
           <p class="long-text">{{ spot.contentText || spot.description }}</p>
@@ -130,12 +137,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-// 企业级改造：替换原生 axios，使用全局 request 进行 Token 自动拦截
 import request from '../utils/request'
 import { ElMessage } from 'element-plus'
 import { Star, StarFilled, EditPen, Share, MagicStick } from '@element-plus/icons-vue'
+// 引入 Leaflet 地图核心库，以符合论文预期设计
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 
 const route = useRoute()
 const router = useRouter()
@@ -145,26 +154,28 @@ const currentUser = JSON.parse(localStorage.getItem('user') || '{}')
 const loading = ref(false)
 const spot = ref(null)
 const comments = ref([])
-const aiSummary = ref('') // AI 摘要
-const aiLoading = ref(false) // 专门控制 AI 卡片的加载动画
-const isFav = ref(false)  // 收藏状态
+const aiSummary = ref('')
+const aiLoading = ref(false)
+const isFav = ref(false)
 
 const newComment = reactive({ score: 5, content: '' })
+let mapInstance = null // 地图实例引用
 
-// 初始化加载
 const init = async () => {
   loading.value = true
   try {
-    // 1. 获取详情
     const res1 = await request.get(`/attraction/detail/${spotId}`)
     if (res1.code === '200') {
       spot.value = res1.data
+
+      // 数据加载完成后，渲染地图
+      nextTick(() => {
+        initMap(spot.value.latitude, spot.value.longitude)
+      })
     }
 
-    // 2. 获取评论
     loadComments()
 
-    // 3. 检查是否收藏 (需登录)
     if (currentUser.userId) {
       const res3 = await request.get(`/favorite/check`, {
         params: { userId: currentUser.userId, spotId: spotId }
@@ -174,7 +185,6 @@ const init = async () => {
       }
     }
 
-    // 4. 获取 AI 摘要
     loadAiSummary()
 
   } catch (e) {
@@ -182,6 +192,26 @@ const init = async () => {
   } finally {
     loading.value = false
   }
+}
+
+// 补充地图渲染方法
+const initMap = (lat, lng) => {
+  if (!lat || !lng) return
+
+  if (mapInstance) mapInstance.remove()
+
+  // 初始化 Leaflet 地图
+  mapInstance = L.map('leaflet-map').setView([lat, lng], 13)
+
+  // 加载 OpenStreetMap 瓦片
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(mapInstance)
+
+  // 添加地标锚点
+  L.marker([lat, lng]).addTo(mapInstance)
+      .bindPopup(`<b>${spot.value.name}</b><br>${spot.value.address || ''}`)
+      .openPopup()
 }
 
 const loadComments = async () => {
@@ -198,7 +228,6 @@ const loadComments = async () => {
 const loadAiSummary = async () => {
   aiLoading.value = true
   try {
-    // 适配后端最新的 RESTful 接口路径
     const res = await request.get(`/ai/summary/${spotId}`)
     if (res.code === '200') {
       aiSummary.value = res.data
@@ -210,16 +239,13 @@ const loadAiSummary = async () => {
   }
 }
 
-// 切换收藏
 const toggleFav = async () => {
   if (!currentUser.userId) return ElMessage.warning('请先登录后收藏')
-
   try {
     const res = await request.post(`/favorite/toggle`, {
       userId: currentUser.userId,
       spotId: spotId
     })
-
     if (res.code === '200') {
       isFav.value = !isFav.value
       ElMessage.success(isFav.value ? '已添加到收藏夹' : '已取消收藏')
@@ -229,22 +255,18 @@ const toggleFav = async () => {
   }
 }
 
-// 预订功能
 const bookTicket = async () => {
   if (!currentUser.userId) {
     ElMessage.warning('请先登录')
     return router.push('/login')
   }
-
   try {
     const res = await request.post('/order/create', {
       spotId: spot.value.spotId,
       spotName: spot.value.name,
       price: spot.value.ticketPrice
     })
-
     if (res.code === '200') {
-      // 跳转支付页
       router.push(`/payment?orderId=${res.data}&price=${spot.value.ticketPrice}`)
     }
   } catch(e) {
@@ -252,10 +274,8 @@ const bookTicket = async () => {
   }
 }
 
-// 提交评论
 const submitComment = async () => {
   if (!newComment.content) return ElMessage.warning('评论内容不能为空')
-
   try {
     const res = await request.post('/comment/add', {
       spotId,
@@ -263,11 +283,10 @@ const submitComment = async () => {
       score: newComment.score,
       userId: currentUser.userId || 1
     })
-
     if (res.code === '200') {
       ElMessage.success('评论发布成功！')
       newComment.content = ''
-      loadComments() // 发布后立刻刷新评论区
+      loadComments()
     }
   } catch (e) {
     console.error('发布评论失败:', e)
@@ -291,7 +310,6 @@ onMounted(() => {
 
 .content-wrapper { background: white; border-radius: 16px; padding: 40px; box-shadow: 0 8px 30px rgba(0,0,0,0.04); }
 
-/* 顶部区域 (保留原样) */
 .top-section { display: flex; gap: 40px; margin-bottom: 40px; }
 .img-box { flex: 1; height: 360px; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
 .img-box img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.5s; }
@@ -305,7 +323,6 @@ onMounted(() => {
 .meta-row { display: flex; align-items: center; gap: 15px; margin-bottom: 25px; }
 .views { color: #999; font-size: 13px; }
 
-/* 价格卡片样式优化 (保留原样) */
 .price-card { background: #f8fbfd; border: 1px solid #eef6fc; padding: 15px 20px; border-radius: 10px; margin-bottom: 25px; display: flex; align-items: center; justify-content: space-between; }
 .price-left { display: flex; align-items: center; }
 .price-card .label { color: #666; margin-right: 15px; }
@@ -317,61 +334,21 @@ onMounted(() => {
 .desc-box { color: #555; line-height: 1.6; margin-bottom: 30px; flex: 1; font-size: 15px; }
 .action-row { display: flex; gap: 15px; }
 
-/* ================= AI 卡片专属炫酷样式 ================= */
-.ai-summary-card {
-  margin-bottom: 25px;
-  border-radius: 12px;
-  border: 1px solid transparent;
-  background-image: linear-gradient(#fff, #fff), linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
-  background-origin: border-box;
-  background-clip: padding-box, border-box;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.05);
-}
-.ai-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.title-with-icon {
-  display: flex;
-  align-items: center;
-  font-size: 18px;
-  font-weight: bold;
-}
-.ai-icon {
-  font-size: 22px;
-  color: #e83e8c;
-  margin-right: 8px;
-}
-.gradient-text {
-  background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-.ai-content {
-  padding: 10px 5px;
-}
-.ai-text {
-  font-size: 15px;
-  line-height: 1.8;
-  color: #333;
-  letter-spacing: 0.5px;
-}
-/* ====================================================== */
+.ai-summary-card { margin-bottom: 25px; border-radius: 12px; border: 1px solid transparent; background-image: linear-gradient(#fff, #fff), linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); background-origin: border-box; background-clip: padding-box, border-box; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
+.ai-header { display: flex; justify-content: space-between; align-items: center; }
+.title-with-icon { display: flex; align-items: center; font-size: 18px; font-weight: bold; }
+.ai-icon { font-size: 22px; color: #e83e8c; margin-right: 8px; }
+.gradient-text { background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.ai-content { padding: 10px 5px; }
+.ai-text { font-size: 15px; line-height: 1.8; color: #333; letter-spacing: 0.5px; }
 
-/* 介绍与评论 (保留原样) */
 .section-block { margin-top: 40px; padding-top: 30px; border-top: 1px dashed #eee; }
 .section-block h3 { border-left: 5px solid #409EFF; padding-left: 12px; font-size: 20px; margin-bottom: 20px; }
-.long-text {
-  line-height: 1.8;
-  color: #444;
-  font-size: 16px;
-  white-space: pre-wrap;
-  min-height: 100px;
-  height: auto;
-}
+.long-text { line-height: 1.8; color: #444; font-size: 16px; white-space: pre-wrap; min-height: 100px; height: auto; }
 
-/* 评论区样式 (保留原样) */
+/* 补充地图容器样式 */
+.map-container { width: 100%; height: 350px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); z-index: 1; }
+
 .post-comment { background: #f9fafc; padding: 20px; border-radius: 10px; margin-bottom: 30px; border: 1px solid #f0f0f0; }
 .post-actions { display: flex; align-items: center; margin-top: 15px; }
 .rate-label { margin-right: 10px; color: #666; }

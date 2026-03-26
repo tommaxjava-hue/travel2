@@ -1,4 +1,4 @@
-package com.example.travelaibackend.component;
+package com.example.travelaibackend.common;
 
 import cn.hutool.dfa.WordTree;
 import org.springframework.stereotype.Component;

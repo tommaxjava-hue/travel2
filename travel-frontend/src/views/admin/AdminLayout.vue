@@ -33,6 +33,11 @@
         <el-menu-item index="/">
           <el-icon><HomeFilled /></el-icon> <span>返回前台</span>
         </el-menu-item>
+
+        <el-menu-item index="/admin/banner">
+          <el-icon><Picture /></el-icon> <span>轮播图管理</span>
+        </el-menu-item>
+
       </el-menu>
     </div>
 
@@ -53,7 +58,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 // 确保引入 List 图标
 import { DataLine, MagicStick, HomeFilled, User, DocumentDelete, List } from '@element-plus/icons-vue'
-
+import { Picture } from '@element-plus/icons-vue'
 const route = useRoute()
 const router = useRouter()
 const routeName = computed(() => route.meta.title || '管理系统')

@@ -2,7 +2,7 @@ package com.example.travelaibackend.controller;
 
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.example.travelaibackend.annotation.RequireSuperAdmin;
+import com.example.travelaibackend.annotation.RequireAdmin;
 import com.example.travelaibackend.common.Result;
 import com.example.travelaibackend.common.ResultCode;
 import com.example.travelaibackend.entity.Attraction;
@@ -12,12 +12,16 @@ import com.example.travelaibackend.service.IUserService;
 import com.example.travelaibackend.utils.UserContext;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -36,51 +40,66 @@ public class AttractionController {
     @Autowired
     private StringRedisTemplate redisTemplate;
 
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     @GetMapping("/list")
-    public Result<List<Attraction>> getList(@RequestParam(required = false) String keyword,
-                                            @RequestParam(required = false) String city) {
-        Long userId = UserContext.getUserId();
-        String cacheKey = "attraction:list:" + StrUtil.nullToEmpty(keyword) + ":" + StrUtil.nullToEmpty(city);
+    public Result<Map<String, Object>> getList(
+            @RequestParam(defaultValue = "1") int pageNum,
+            @RequestParam(defaultValue = "12") int pageSize,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String city) {
 
-        // 1. 尝试查 Redis 缓存 (仅在无个性化查询时)
+        Long userId = UserContext.getUserId();
+        String cacheKey = "attraction:list:all:" + StrUtil.nullToEmpty(keyword) + ":" + StrUtil.nullToEmpty(city);
+
+        List<Attraction> allSpots = null;
+
         if (userId == null && Boolean.TRUE.equals(redisTemplate.hasKey(cacheKey))) {
             try {
                 String json = redisTemplate.opsForValue().get(cacheKey);
-                // 防缓存穿透：如果是特殊空值标识 "[]"，直接返回空集合
                 if ("[]".equals(json)) {
-                    return Result.success(new ArrayList<>());
-                }
-                if (StrUtil.isNotBlank(json)) {
-                    List<Attraction> list = mapper.readValue(json, new TypeReference<List<Attraction>>() {});
-                    return Result.success(list);
+                    allSpots = new ArrayList<>();
+                } else if (StrUtil.isNotBlank(json)) {
+                    allSpots = mapper.readValue(json, new TypeReference<List<Attraction>>() {});
                 }
             } catch (Exception e) {
                 e.printStackTrace();
             }
         }
 
-        // 2. 查数据库
-        QueryWrapper<Attraction> query = new QueryWrapper<>();
-        if (StrUtil.isNotBlank(keyword)) {
-            query.and(w -> w.like("name", keyword).or().like("city", keyword).or().like("tags", keyword));
-        }
-        if (StrUtil.isNotBlank(city)) {
-            query.eq("city", city);
-        }
-
-        List<Attraction> allSpots = attractionService.list(query);
-
-        // 防缓存穿透：如果数据库也为空，缓存一个较短时间的空值
-        if (allSpots == null || allSpots.isEmpty()) {
-            if (userId == null) {
-                redisTemplate.opsForValue().set(cacheKey, "[]", 60, TimeUnit.SECONDS);
+        if (allSpots == null) {
+            QueryWrapper<Attraction> query = new QueryWrapper<>();
+            if (StrUtil.isNotBlank(keyword)) {
+                query.and(w -> w.like("name", keyword).or().like("city", keyword).or().like("tags", keyword));
             }
-            return Result.success(new ArrayList<>());
+            if (StrUtil.isNotBlank(city)) {
+                query.eq("city", city);
+            }
+            allSpots = attractionService.list(query);
+
+            if (allSpots == null || allSpots.isEmpty()) {
+                if (userId == null) {
+                    redisTemplate.opsForValue().set(cacheKey, "[]", 60, TimeUnit.SECONDS);
+                }
+                Map<String, Object> emptyRes = new HashMap<>();
+                emptyRes.put("total", 0);
+                emptyRes.put("list", new ArrayList<>());
+                return Result.success(emptyRes);
+            }
+
+            if (userId == null) {
+                try {
+                    String json = mapper.writeValueAsString(allSpots);
+                    long randomMinutes = ThreadLocalRandom.current().nextLong(5);
+                    redisTemplate.opsForValue().set(cacheKey, json, 10 + randomMinutes, TimeUnit.MINUTES);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
         }
 
-        // 3. 排序逻辑
         if (userId != null) {
             SysUser user = userService.getById(userId);
             if (user != null && StrUtil.isNotBlank(user.getTags())) {
@@ -106,18 +125,16 @@ public class AttractionController {
             });
         }
 
-        // 4. 写入缓存 (防雪崩：过期时间 10 分钟 + 0~5分钟随机抖动)
-        if (userId == null) {
-            try {
-                String json = mapper.writeValueAsString(allSpots);
-                long randomMinutes = ThreadLocalRandom.current().nextLong(5);
-                redisTemplate.opsForValue().set(cacheKey, json, 10 + randomMinutes, TimeUnit.MINUTES);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
+        int total = allSpots.size();
+        int fromIndex = (pageNum - 1) * pageSize;
+        int toIndex = Math.min(fromIndex + pageSize, total);
+        List<Attraction> pageList = fromIndex < total ? allSpots.subList(fromIndex, toIndex) : new ArrayList<>();
 
-        return Result.success(allSpots);
+        Map<String, Object> result = new HashMap<>();
+        result.put("total", total);
+        result.put("list", pageList);
+
+        return Result.success(result);
     }
 
     private int calculateTagMatchScore(String spotTags, String[] userTags) {
@@ -142,17 +159,30 @@ public class AttractionController {
 
     @GetMapping("/detail/{id}")
     public Result<Attraction> getDetail(@PathVariable Long id) {
-        return Result.success(attractionService.getById(id));
+        Attraction spot = attractionService.getById(id);
+        if (spot != null) {
+            redisTemplate.opsForValue().increment("attraction:views:" + id);
+        }
+        return Result.success(spot);
     }
 
-    @RequireSuperAdmin
+    @RequireAdmin
     @PostMapping("/add")
     public Result<?> add(@RequestBody Attraction attraction) {
+        Long userId = UserContext.getUserId();
+        SysUser user = userService.getById(userId);
+        boolean isAdmin = user != null && "admin".equals(user.getRole());
+
+        // 业务层兜底拦截
+        if (userId == null || (userId != 88L && !isAdmin)) {
+            return Result.error(ResultCode.FORBIDDEN.getCode(), "业务层越权拦截：新增资源仅管理员及最高统帅(ID:88)可用");
+        }
+
         if (StrUtil.isBlank(attraction.getName())) return Result.error(ResultCode.VALIDATE_FAILED.getCode(), "名称不能为空");
         if (StrUtil.isBlank(attraction.getAddress())) return Result.error(ResultCode.VALIDATE_FAILED.getCode(), "地址必须强制填写");
         if (attraction.getTicketPrice() == null) return Result.error(ResultCode.VALIDATE_FAILED.getCode(), "门票价格必须强制填写");
         if (attraction.getLatitude() == null || attraction.getLongitude() == null) {
-            return Result.error(ResultCode.VALIDATE_FAILED.getCode(), "经纬度必填(影响地图显示)");
+            return Result.error(ResultCode.VALIDATE_FAILED.getCode(), "经纬度必填");
         }
 
         if (attraction.getRating() == null) attraction.setRating(java.math.BigDecimal.valueOf(4.5));
@@ -165,9 +195,17 @@ public class AttractionController {
         return Result.success("入库成功");
     }
 
-    @RequireSuperAdmin
+    @RequireAdmin
     @PostMapping("/update")
     public Result<?> update(@RequestBody Attraction attraction) {
+        Long userId = UserContext.getUserId();
+        SysUser user = userService.getById(userId);
+        boolean isAdmin = user != null && "admin".equals(user.getRole());
+
+        if (userId == null || (userId != 88L && !isAdmin)) {
+            return Result.error(ResultCode.FORBIDDEN.getCode(), "业务层越权拦截：修改资源仅管理员及最高统帅(ID:88)可用");
+        }
+
         if (attraction.getSpotId() == null) {
             return Result.error(ResultCode.VALIDATE_FAILED.getCode(), "ID不能为空");
         }
@@ -176,17 +214,33 @@ public class AttractionController {
         return Result.success("更新成功");
     }
 
-    @RequireSuperAdmin
+    @RequireAdmin
     @DeleteMapping("/delete/{id}")
     public Result<?> delete(@PathVariable Long id) {
+        Long userId = UserContext.getUserId();
+        SysUser user = userService.getById(userId);
+        boolean isAdmin = user != null && "admin".equals(user.getRole());
+
+        if (userId == null || (userId != 88L && !isAdmin)) {
+            return Result.error(ResultCode.FORBIDDEN.getCode(), "业务层越权拦截：删除资源仅管理员及最高统帅(ID:88)可用");
+        }
+
         attractionService.removeById(id);
         deleteListCache();
         return Result.success("已删除");
     }
 
-    @RequireSuperAdmin
+    @RequireAdmin
     @PostMapping("/toggleHot")
     public Result<?> toggleHot(@RequestBody Attraction spot) {
+        Long userId = UserContext.getUserId();
+        SysUser user = userService.getById(userId);
+        boolean isAdmin = user != null && "admin".equals(user.getRole());
+
+        if (userId == null || (userId != 88L && !isAdmin)) {
+            return Result.error(ResultCode.FORBIDDEN.getCode(), "业务层越权拦截：核心操作仅管理员及最高统帅(ID:88)可用");
+        }
+
         Attraction dbSpot = attractionService.getById(spot.getSpotId());
         if (dbSpot == null) return Result.error("404", "景点不存在");
 
@@ -200,8 +254,7 @@ public class AttractionController {
 
     private void deleteListCache() {
         try {
-            // 清除默认列表缓存。大规模生产环境下建议使用 Redis 事件订阅机制或 Canal 监听 Binlog 进行精确失效
-            redisTemplate.delete("attraction:list::");
+            redisTemplate.delete("attraction:list:all::");
         } catch (Exception e) {
             e.printStackTrace();
         }

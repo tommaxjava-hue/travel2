@@ -39,7 +39,13 @@ const routes = [
             { path: 'spot-add', component: SpotAdd, meta: { title: 'AI 录入' } },
             { path: 'spot-list', component: SpotManage, meta: { title: '景点管理' } },
             { path: 'user', component: UserManage, meta: { title: '用户管理' } },
-            { path: 'content', component: ContentManage, meta: { title: '内容治理' } }
+            { path: 'content', component: ContentManage, meta: { title: '内容治理' }},
+            {
+                path: 'banner',
+                name: 'BannerManage',
+                component: () => import('../views/admin/BannerManage.vue'),
+                meta: { title: '轮播图管理' }
+            },
         ]
     }
 ]

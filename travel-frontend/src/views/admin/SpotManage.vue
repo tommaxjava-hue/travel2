@@ -3,33 +3,33 @@
     <el-card class="box-card" shadow="hover">
       <template #header>
         <div class="card-header">
-          <span>🗺️ 企业级景点资源库</span>
+          <span>🗺️ 景点资源库</span>
           <div class="header-actions">
             <el-input
                 v-model="searchQuery.keyword"
                 placeholder="搜索景点/标签..."
                 style="width: 200px; margin-right: 12px;"
                 clearable
-                @keyup.enter="fetchData"
+                @keyup.enter="handleSearch"
             />
             <el-input
                 v-model="searchQuery.city"
                 placeholder="城市筛选..."
                 style="width: 150px; margin-right: 12px;"
                 clearable
-                @keyup.enter="fetchData"
+                @keyup.enter="handleSearch"
             />
-            <el-button type="primary" @click="fetchData" :loading="loading">
+            <el-button type="primary" @click="handleSearch" :loading="loading">
               <el-icon><Search /></el-icon> 检索
             </el-button>
-            <el-button type="success" @click="openAddDialog" :disabled="!isSuperAdmin">
+            <el-button type="success" @click="openAddDialog" :disabled="!isAdmin">
               <el-icon><Plus /></el-icon> 新增景点
             </el-button>
           </div>
         </div>
       </template>
 
-      <el-table :data="paginatedData" v-loading="loading" border stripe highlight-current-row style="width: 100%">
+      <el-table :data="tableData" v-loading="loading" border stripe highlight-current-row style="width: 100%">
         <el-table-column prop="spotId" label="ID" width="70" align="center" />
 
         <el-table-column label="主图" width="100" align="center">
@@ -50,7 +50,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="name" label="景点名称" min-width="150" show-overflow-tooltip>
+        <el-table-column prop="name" label="景点名称" min-width="250" show-overflow-tooltip>
           <template #default="scope">
             <strong>{{ scope.row.name }}</strong>
           </template>
@@ -76,7 +76,7 @@
                 v-model="scope.row.isHot"
                 :active-value="1"
                 :inactive-value="0"
-                :disabled="!isSuperAdmin"
+                :disabled="!isAdmin"
                 @change="handleToggleHot(scope.row)"
             />
           </template>
@@ -84,10 +84,10 @@
 
         <el-table-column label="高危操作" width="180" fixed="right" align="center">
           <template #default="scope">
-            <el-button size="small" type="primary" plain @click="openEditDialog(scope.row)" :disabled="!isSuperAdmin">
+            <el-button size="small" type="primary" plain @click="openEditDialog(scope.row)" :disabled="!isAdmin">
               编辑
             </el-button>
-            <el-button size="small" type="danger" plain @click="handleDelete(scope.row)" :disabled="!isSuperAdmin">
+            <el-button size="small" type="danger" plain @click="handleDelete(scope.row)" :disabled="!isAdmin">
               删除
             </el-button>
           </template>
@@ -102,6 +102,8 @@
             layout="total, sizes, prev, pager, next, jumper"
             :total="total"
             background
+            @current-change="handlePageChange"
+            @size-change="handleSizeChange"
         />
       </div>
     </el-card>
@@ -239,38 +241,25 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Plus, Picture as IconPicture } from '@element-plus/icons-vue'
 import request from '../../utils/request'
 
-// 全局常量与用户信息
 const FALLBACK_IMG = 'https://images.unsplash.com/photo-1596394516093-501ba68a0ba6?ixlib=rb-1.2.1&auto=format&fit=crop&w=150&q=80'
 const currentUser = JSON.parse(localStorage.getItem('user') || '{}')
-const token = localStorage.getItem('token') // 获取本地 Token
+const token = localStorage.getItem('token')
 
-// 【核心鉴权】ID=88 铁律
-const isSuperAdmin = computed(() => currentUser.userId === 88)
+const isAdmin = computed(() => currentUser.userId === 88 || currentUser.role === 'admin')
 
-// 上传相关配置
-const uploadMode = ref('url') // 'url' | 'file'
-// 手动构造上传请求头，携带 Token
+const uploadMode = ref('url')
 const uploadHeaders = computed(() => ({
   Authorization: token ? `Bearer ${token}` : ''
 }))
 
-// 状态定义
 const tableData = ref([])
 const loading = ref(false)
 const searchQuery = reactive({ keyword: '', city: '' })
 
-// 分页状态
 const currentPage = ref(1)
 const pageSize = ref(10)
-const total = computed(() => tableData.value.length)
+const total = ref(0)
 
-// 前端分页计算
-const paginatedData = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value
-  return tableData.value.slice(start, start + pageSize.value)
-})
-
-// 弹窗表单
 const dialogVisible = ref(false)
 const submitLoading = ref(false)
 const dialogTitle = ref('新增景点')
@@ -296,25 +285,43 @@ const rules = {
   ticketPrice: [{ required: true, message: '必须设定票价', trigger: 'blur' }],
 }
 
-// 获取数据
 const fetchData = async () => {
   loading.value = true
   try {
     const res = await request.get('/attraction/list', {
-      params: { ...searchQuery }
+      params: {
+        ...searchQuery,
+        pageNum: currentPage.value,
+        pageSize: pageSize.value
+      }
     })
     if (res.code === '200') {
-      tableData.value = res.data || []
-      currentPage.value = 1
+      tableData.value = res.data.list || []
+      total.value = res.data.total || 0
     }
   } finally {
     loading.value = false
   }
 }
 
-// 切换热门
+const handleSearch = () => {
+  currentPage.value = 1
+  fetchData()
+}
+
+const handlePageChange = (val) => {
+  currentPage.value = val
+  fetchData()
+}
+
+const handleSizeChange = (val) => {
+  pageSize.value = val
+  currentPage.value = 1
+  fetchData()
+}
+
 const handleToggleHot = async (row) => {
-  if (!isSuperAdmin.value) return
+  if (!isAdmin.value) return
   try {
     const res = await request.post('/attraction/toggleHot', { spotId: row.spotId })
     if (res.code !== '200') row.isHot = row.isHot === 1 ? 0 : 1
@@ -324,18 +331,16 @@ const handleToggleHot = async (row) => {
   }
 }
 
-// 弹窗操作
 const openAddDialog = () => {
   dialogTitle.value = '➕ 录入新景点'
   resetForm()
-  uploadMode.value = 'file' // 新增默认使用文件上传
+  uploadMode.value = 'file'
   dialogVisible.value = true
 }
 
 const openEditDialog = (row) => {
   dialogTitle.value = '✏️ 编辑景点档案'
   Object.assign(form, JSON.parse(JSON.stringify(row)))
-  // 智能判断：如果原图片是本地上传的地址，自动切到文件模式，否则切到 URL 模式
   uploadMode.value = form.imageUrl && form.imageUrl.includes('/files/') ? 'file' : 'url'
   dialogVisible.value = true
 }
@@ -348,12 +353,11 @@ const resetForm = () => {
   form.rating = 4.5
 }
 
-// ================= 上传回调处理 =================
 const handleUploadSuccess = (res) => {
   if (res.code === '200') {
-    form.imageUrl = res.data // 将后端返回的 URL 填入表单
+    form.imageUrl = res.data
     ElMessage.success('图片上传成功')
-    formRef.value.clearValidate('imageUrl') // 清除校验报错
+    formRef.value.clearValidate('imageUrl')
   } else {
     ElMessage.error(res.msg || '上传失败')
   }
@@ -367,9 +371,7 @@ const beforeUpload = (file) => {
   if (!isLt5M) ElMessage.error('上传图片大小不能超过 5MB!')
   return isImg && isLt5M
 }
-// ===============================================
 
-// 提交表单
 const submitForm = () => {
   formRef.value.validate(async (valid) => {
     if (valid) {
@@ -389,7 +391,6 @@ const submitForm = () => {
   })
 }
 
-// 删除
 const handleDelete = async (row) => {
   try {
     await ElMessageBox.confirm(

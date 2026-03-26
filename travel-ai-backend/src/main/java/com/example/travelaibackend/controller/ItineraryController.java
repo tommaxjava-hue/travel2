@@ -21,7 +21,6 @@ public class ItineraryController {
     @PostMapping("/add")
     public Result<?> add(@RequestBody Itinerary itinerary) {
         itinerary.setCreateTime(LocalDateTime.now());
-        // 如果前端没传 userId，默认设为1 (演示用)
         if (itinerary.getUserId() == null) {
             itinerary.setUserId(1L);
         }
@@ -30,13 +29,23 @@ public class ItineraryController {
     }
 
     // 2. 获取我的行程列表
-    // GET /itinerary/list?userId=1
     @GetMapping("/list")
     public Result<List<Itinerary>> list(Long userId) {
-        if (userId == null) userId = 1L; // 默认查 id=1
+        if (userId == null) userId = 1L;
         QueryWrapper<Itinerary> query = new QueryWrapper<>();
         query.eq("user_id", userId);
         query.orderByDesc("create_time");
         return Result.success(itineraryService.list(query));
+    }
+
+    // 3. 【新增功能】删除历史行程，闭合论文表2.10的业务需求
+    @DeleteMapping("/delete/{id}")
+    public Result<?> delete(@PathVariable Long id) {
+        boolean success = itineraryService.removeById(id);
+        if (success) {
+            return Result.success("行程已成功删除");
+        } else {
+            return Result.error("500", "行程删除失败，该记录可能已被移除");
+        }
     }
 }

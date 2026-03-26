@@ -43,7 +43,6 @@ public class UserController {
             return Result.error(ResultCode.VALIDATE_FAILED.getCode(), "账号或密码不能为空");
         }
 
-        // 1. 图形验证码校验
         if (StrUtil.isBlank(verifyCode) || StrUtil.isBlank(verifyKey)) {
             return Result.error(ResultCode.VALIDATE_FAILED.getCode(), "请输入验证码");
         }
@@ -53,7 +52,6 @@ public class UserController {
         }
         CaptchaController.CAPTCHA_STORE.remove(verifyKey);
 
-        // 2. 账号校验
         QueryWrapper<SysUser> query = new QueryWrapper<>();
         query.eq("username", username);
         SysUser dbUser = userService.getOne(query);
@@ -61,18 +59,14 @@ public class UserController {
         if (dbUser == null) return Result.error("401", "用户不存在");
         if ("BANNED".equals(dbUser.getPassword())) return Result.error("403", "该账号已被封禁");
 
-        // 3. 密码比对 (终极兼容：支持 BCrypt密文、MD5密文、明文 三重智能比对)
         String dbPwd = dbUser.getPassword();
         boolean isMatch = false;
 
         if (dbPwd.startsWith("$2a$")) {
-            // 企业级 BCrypt 校验
             isMatch = BCrypt.checkpw(password, dbPwd);
         } else if (dbPwd.length() == 32) {
-            // 过渡期 MD5 校验
             isMatch = dbPwd.equalsIgnoreCase(SecureUtil.md5(password));
         } else {
-            // 本地测试明文校验
             isMatch = dbPwd.equals(password);
         }
 
@@ -80,15 +74,13 @@ public class UserController {
             return Result.error("401", "密码错误");
         }
 
-        // 4. 签发 Token 并擦除敏感数据返回
         String token = JwtUtils.generateToken(dbUser.getUserId().longValue());
         dbUser.setPassword(null);
 
-        // 5. 记录日活 (DAU)
         try {
             String todayKey = "dau:" + LocalDate.now().toString();
             redisTemplate.opsForSet().add(todayKey, String.valueOf(dbUser.getUserId()));
-            redisTemplate.expire(todayKey, 3, TimeUnit.DAYS);
+            redisTemplate.expire(todayKey, 7, TimeUnit.DAYS); // 延长至7天以供图表统计
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -111,7 +103,6 @@ public class UserController {
             return Result.error(ResultCode.VALIDATE_FAILED.getCode(), "请输入用户名和密码");
         }
 
-        // 1. 图形验证码校验
         if (StrUtil.isBlank(verifyCode) || StrUtil.isBlank(verifyKey)) {
             return Result.error(ResultCode.VALIDATE_FAILED.getCode(), "请输入验证码");
         }
@@ -121,14 +112,12 @@ public class UserController {
         }
         CaptchaController.CAPTCHA_STORE.remove(verifyKey);
 
-        // 2. 账号判重
         QueryWrapper<SysUser> query = new QueryWrapper<>();
         query.eq("username", username);
         if (userService.count(query) > 0) {
             return Result.error("400", "用户名已存在");
         }
 
-        // 3. 入库 (企业级安全：采用强大的 BCrypt 算法加密存储)
         SysUser user = new SysUser();
         user.setUsername(username);
         user.setPassword(BCrypt.hashpw(password));
@@ -144,22 +133,28 @@ public class UserController {
     @RequireSuperAdmin
     @GetMapping("/list")
     public Result<List<SysUser>> list() {
+        // 【核心底线】：硬性约束超级管理员 ID=88，防止拦截器被绕过
+        if (UserContext.getUserId() == null || UserContext.getUserId() != 88L) {
+            return Result.error(ResultCode.FORBIDDEN.getCode(), "业务层越权拦截：仅最高统帅(ID:88)可查看或操作全体用户池");
+        }
         return Result.success(userService.list());
     }
 
     @RequireSuperAdmin
     @PostMapping("/toggleStatus")
     public Result<?> toggleStatus(@RequestBody SysUser user) {
+        if (UserContext.getUserId() == null || UserContext.getUserId() != 88L) {
+            return Result.error(ResultCode.FORBIDDEN.getCode(), "业务层越权拦截：封禁/解封功能仅最高统帅(ID:88)可用");
+        }
+
         SysUser dbUser = userService.getById(user.getUserId());
         if (dbUser == null) return Result.error("404", "用户不存在");
 
-        // 核心保护：严禁对最高统帅(88)进行封禁操作
         if (dbUser.getUserId() == 88) {
             return Result.error(ResultCode.FORBIDDEN.getCode(), "系统底层限制：不可更改最高权限账号状态");
         }
 
         if ("BANNED".equals(dbUser.getPassword())) {
-            // 解封时，默认密码重置为 123456 的 BCrypt 密文
             dbUser.setPassword(BCrypt.hashpw("123456"));
             userService.updateById(dbUser);
             return Result.success("已解封，密码重置为 123456");
@@ -173,6 +168,10 @@ public class UserController {
     @RequireSuperAdmin
     @PostMapping("/changeRole")
     public Result<?> changeRole(@RequestBody Map<String, Object> params) {
+        if (UserContext.getUserId() == null || UserContext.getUserId() != 88L) {
+            return Result.error(ResultCode.FORBIDDEN.getCode(), "业务层越权拦截：权限分配功能仅最高统帅(ID:88)可用");
+        }
+
         Integer targetUserId = (Integer) params.get("targetUserId");
         String newRole = (String) params.get("newRole");
 
@@ -180,7 +179,6 @@ public class UserController {
             return Result.error(ResultCode.VALIDATE_FAILED.getCode(), "参数错误");
         }
 
-        // 核心保护：最高统帅(88)不可被降级或被他人修改权限
         if (targetUserId == 88) {
             return Result.error(ResultCode.FORBIDDEN.getCode(), "系统底层限制：不可修改最高权限账号的系统角色");
         }

@@ -1,9 +1,12 @@
 package com.example.travelaibackend.controller;
 
 import com.example.travelaibackend.common.Result;
-import com.example.travelaibackend.component.SensitiveFilter;
+import com.example.travelaibackend.common.SensitiveFilter;
 import com.example.travelaibackend.entity.Post;
+import com.example.travelaibackend.entity.SysUser;
 import com.example.travelaibackend.service.IPostService;
+import com.example.travelaibackend.service.IUserService;
+import com.example.travelaibackend.utils.UserContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,6 +24,9 @@ public class PostController {
     @Autowired
     private SensitiveFilter sensitiveFilter;
 
+    @Autowired
+    private IUserService userService;
+
     // 获取列表
     @GetMapping("/list")
     public Result<List<Post>> list() {
@@ -30,7 +36,6 @@ public class PostController {
     // 发布攻略
     @PostMapping("/add")
     public Result<?> add(@RequestBody Post post) {
-        // 1. 敏感词校验
         String badWordTitle = sensitiveFilter.findFirstSensitiveWord(post.getTitle());
         if (badWordTitle != null) {
             return Result.error("403", "标题包含违规内容：" + badWordTitle);
@@ -40,7 +45,6 @@ public class PostController {
             return Result.error("403", "正文包含违规内容：" + badWordContent);
         }
 
-        // 2. 保存
         post.setCreateTime(LocalDateTime.now());
         post.setViewCount(0);
         postService.save(post);
@@ -53,9 +57,27 @@ public class PostController {
         return Result.success(postService.getById(id));
     }
 
-    // 【新增】删除攻略
+    // 删除攻略
     @DeleteMapping("/delete/{id}")
     public Result<?> delete(@PathVariable Long id) {
+        Long userId = UserContext.getUserId();
+        if (userId == null) {
+            return Result.error("401", "请先登录");
+        }
+
+        Post post = postService.getById(id);
+        if (post == null) {
+            return Result.error("404", "攻略不存在");
+        }
+
+        SysUser user = userService.getById(userId);
+        boolean isAdmin = user != null && "admin".equals(user.getRole());
+
+        // 【强制业务约束】：允许作者本人、普通管理员 或 最高统帅(ID:88) 强制删除
+        if (!userId.equals(post.getUserId()) && userId != 88L && !isAdmin) {
+            return Result.error("403", "业务层越权拦截：您无权删除他人游记，社区治理仅管理员及最高统帅(ID:88)可用");
+        }
+
         boolean success = postService.removeById(id);
         return success ? Result.success("攻略已删除") : Result.error("500", "删除失败");
     }

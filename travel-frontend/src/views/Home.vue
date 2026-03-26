@@ -1,14 +1,24 @@
 <template>
   <div class="home-page">
     <div class="hero-wrapper">
-      <div class="hero-bg" style="background-image: url('https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?ixlib=rb-1.2.1&auto=format&fit=crop&w=1920&q=80');"></div>
+      <el-carousel class="hero-carousel" height="450px" :interval="4000" arrow="hover">
+        <el-carousel-item v-for="item in bannerList" :key="item.bannerId">
+          <div class="hero-bg" :style="{ backgroundImage: `url(${item.imageUrl})` }"></div>
+        </el-carousel-item>
+        <el-carousel-item v-if="bannerList.length === 0">
+          <div class="hero-bg" style="background-image: url('https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?ixlib=rb-1.2.1&auto=format&fit=crop&w=1920&q=80');"></div>
+        </el-carousel-item>
+      </el-carousel>
 
       <div class="hero-overlay">
         <h1 class="slogan">AI 智启旅程，发现世界之美</h1>
 
         <div class="big-search-box">
-          <input v-model="keyword" placeholder="搜目的地 / 攻略..." @keyup.enter="loadSpots">
-          <button @click="loadSpots">搜索</button>
+          <el-select v-model="selectedCity" placeholder="选择城市" clearable class="city-selector" @change="loadSpots(true)">
+            <el-option v-for="c in cityList" :key="c" :label="c" :value="c" />
+          </el-select>
+          <input v-model="keyword" placeholder="搜目的地 / 攻略..." @keyup.enter="loadSpots(true)">
+          <button @click="loadSpots(true)">搜索</button>
         </div>
       </div>
     </div>
@@ -38,13 +48,9 @@
 
         <template #default>
           <div class="spot-grid-layout">
-            <div v-for="spot in paginatedSpots" :key="spot.spotId" class="spot-card" @click="$router.push(`/detail/${spot.spotId}`)">
+            <div v-for="spot in spotList" :key="spot.spotId" class="spot-card" @click="$router.push(`/detail/${spot.spotId}`)">
               <div class="card-img">
-                <img
-                    :src="spot.imageUrl"
-                    loading="lazy"
-                    @error="handleImgError"
-                />
+                <img :src="spot.imageUrl" loading="lazy" @error="handleImgError" />
                 <div class="rating-badge">★ {{ spot.rating }}</div>
               </div>
               <div class="card-info">
@@ -59,13 +65,13 @@
         </template>
       </el-skeleton>
 
-      <el-empty v-if="spotList.length === 0 && !loading" description="暂无相关景点，试试搜索其他城市" />
+      <el-empty v-if="spotList.length === 0 && !loading" description="暂无相关景点，试试搜索其他城市或清空条件" />
 
-      <div class="pagination-box" v-if="spotList.length > 0">
+      <div class="pagination-box" v-if="totalSpots > 0">
         <el-pagination
             v-model:current-page="currentPage"
             v-model:page-size="pageSize"
-            :total="spotList.length"
+            :total="totalSpots"
             :page-sizes="[12, 24, 36]"
             layout="total, sizes, prev, pager, next, jumper"
             background
@@ -79,8 +85,11 @@
 
     <div v-show="aiVisible" class="ai-window">
       <div class="chat-header">
-        <span>🤖 AI 导游 (流式版)</span>
-        <span class="close-btn" @click="aiVisible = false">×</span>
+        <span>🤖 AI 导游</span>
+        <div style="display: flex; align-items: center; gap: 15px;">
+          <span style="font-size: 13px; cursor: pointer; opacity: 0.8;" @click="clearChat" title="清空历史对话">清空</span>
+          <span class="close-btn" @click="aiVisible = false">×</span>
+        </div>
       </div>
 
       <div class="chat-body" ref="chatBox">
@@ -105,8 +114,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, watch, computed } from 'vue'
-// 企业级改造：替换原生 axios，引入带有自动 Token 注入和全局异常拦截的 request
+import { ref, onMounted, nextTick, watch } from 'vue'
 import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -115,45 +123,84 @@ import { Star } from '@element-plus/icons-vue'
 const router = useRouter()
 const currentUser = JSON.parse(localStorage.getItem('user') || '{}')
 const spotList = ref([])
+const totalSpots = ref(0)
 const loading = ref(false)
-const keyword = ref('')
 
-// 分页变量
+const bannerList = ref([])
+
+const keyword = ref('')
+const selectedCity = ref('')
+const cityList = ref([])
+
 const currentPage = ref(1)
 const pageSize = ref(12)
 
 const aiVisible = ref(false)
 const aiQuestion = ref('')
 const aiLoading = ref(false)
-const chatHistory = ref([{ role: 'ai', content: '你好！我是你的智能导游，想去哪里玩？' }])
+const chatStorageKey = `ai_chat_history_${currentUser.userId || 'guest'}`
+const defaultChat = [{ role: 'ai', content: '你好！我是你的智能导游，想去哪里玩？' }]
+
+// 从本地存储读取历史记录，如果有则解析，没有则用默认的
+const savedChat = localStorage.getItem(chatStorageKey)
+const chatHistory = ref(savedChat ? JSON.parse(savedChat) : defaultChat)
+
+// 深度监听 chatHistory，一旦新增了对话或者 AI 正在打字输出，就实时保存到本地
+watch(chatHistory, (newVal) => {
+  localStorage.setItem(chatStorageKey, JSON.stringify(newVal))
+}, { deep: true })
+
+// 增加一个清空记录的方法（体验更好）
+const clearChat = () => {
+  chatHistory.value = [{ role: 'ai', content: '你好！我是你的智能导游，想去哪里玩？' }]
+}
 const chatBox = ref(null)
 
 const FALLBACK_IMG = 'https://images.unsplash.com/photo-1596394516093-501ba68a0ba6?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80'
-
-const paginatedSpots = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value
-  const end = start + pageSize.value
-  return spotList.value.slice(start, end)
-})
 
 const handleImgError = (e) => {
   e.target.src = FALLBACK_IMG
 }
 
 watch(keyword, (newVal) => {
-  if (!newVal) loadSpots()
+  if (!newVal) loadSpots(true)
 })
 
-const loadSpots = async () => {
+const loadBanners = async () => {
+  try {
+    const res = await request.get('/banner/list/active')
+    if (res.code === '200') {
+      bannerList.value = res.data
+    }
+  } catch (e) {
+    console.error('获取轮播图失败', e)
+  }
+}
+
+const getCities = async () => {
+  try {
+    const res = await request.get('/attraction/cities')
+    if (res.code === '200') cityList.value = res.data
+  } catch (e) {
+    console.error('获取城市列表失败', e)
+  }
+}
+
+const loadSpots = async (resetPage = false) => {
+  if (resetPage) currentPage.value = 1
   loading.value = true
   try {
-    // 企业级改造：使用封装好的 request 对象，响应体会自动解包，同时后端通过 Token 自动识别用户
     const res = await request.get('/attraction/list', {
-      params: { keyword: keyword.value }
+      params: {
+        pageNum: currentPage.value,
+        pageSize: pageSize.value,
+        keyword: keyword.value,
+        city: selectedCity.value
+      }
     })
     if(res.code === '200') {
-      spotList.value = res.data
-      currentPage.value = 1
+      spotList.value = res.data.list
+      totalSpots.value = res.data.total
     }
   } finally {
     loading.value = false
@@ -162,12 +209,13 @@ const loadSpots = async () => {
 
 const handlePageChange = (val) => {
   currentPage.value = val
+  loadSpots()
   document.getElementById('spot-list-anchor').scrollIntoView({ behavior: 'smooth' })
 }
 
 const handleSizeChange = (val) => {
   pageSize.value = val
-  currentPage.value = 1
+  loadSpots(true)
 }
 
 const sendAiStream = () => {
@@ -180,9 +228,7 @@ const sendAiStream = () => {
 
   nextTick(() => { if(chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight })
 
-  // EventSource 依然保持，后端对于非敏感流式接口并未强制要求 Header Token 拦截
   const eventSource = new EventSource(`http://localhost:8080/ai/stream/ask?question=${encodeURIComponent(q)}&userId=${currentUser.userId || ''}`)
-
   let currentAiMsg = null
 
   eventSource.onopen = () => {
@@ -210,7 +256,6 @@ const sendAiStream = () => {
 const saveAiNote = async (content) => {
   if (!currentUser.userId) return ElMessage.warning('请先登录')
   try {
-    // 企业级改造：使用 request 发送，统一处理 401 和异常错误
     const res = await request.post('/ai/saveItinerary', {
       userId: currentUser.userId,
       content: content
@@ -219,25 +264,39 @@ const saveAiNote = async (content) => {
       ElMessage.success('已保存到【我的行程计划】')
     }
   } catch(e) {
-    // 错误已经由 request.js 全局拦截并提示，此处无需额外处理
     console.error(e)
   }
 }
 
-onMounted(() => loadSpots())
+onMounted(() => {
+  loadBanners()
+  getCities()
+  loadSpots()
+})
 </script>
 
 <style scoped>
-/* 样式部分完全保留原版设计 */
 .home-page { min-height: 100vh; background-color: #f5f7fa; }
+
 .hero-wrapper { position: relative; height: 450px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-.hero-bg { position: absolute; width: 100%; height: 100%; background-size: cover; background-position: center; filter: brightness(0.7); transition: transform 3s; }
-.hero-wrapper:hover .hero-bg { transform: scale(1.05); }
-.hero-overlay { position: relative; z-index: 2; text-align: center; color: white; width: 100%; max-width: 800px; }
+.hero-carousel { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+.hero-bg { width: 100%; height: 100%; background-size: cover; background-position: center; filter: brightness(0.7); transition: transform 3s; }
+.hero-wrapper:hover .hero-bg { transform: scale(1.02); }
+
+.hero-overlay { position: relative; z-index: 2; text-align: center; color: white; width: 100%; max-width: 800px; pointer-events: none; }
 .slogan { font-size: 42px; margin-bottom: 30px; letter-spacing: 2px; text-shadow: 0 4px 10px rgba(0,0,0,0.5); font-weight: 800; }
 
-.big-search-box { display: flex; background: rgba(255,255,255,0.25); backdrop-filter: blur(10px); padding: 5px; border-radius: 50px; border: 1px solid rgba(255,255,255,0.3); box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
-.big-search-box input { flex: 1; border: none; font-size: 16px; padding: 12px 25px; outline: none; background: transparent; color: white; }
+.big-search-box { pointer-events: auto; display: flex; align-items: center; background: rgba(255,255,255,0.25); backdrop-filter: blur(10px); padding: 5px; border-radius: 50px; border: 1px solid rgba(255,255,255,0.3); box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
+.city-selector { width: 110px; margin-left: 20px; }
+:deep(.city-selector .el-input__wrapper) {
+  background: rgba(255,255,255,0.15);
+  box-shadow: none;
+  border-radius: 30px;
+}
+:deep(.city-selector .el-input__inner) { color: white; font-weight: bold; text-align: center;}
+:deep(.city-selector .el-input__inner::placeholder) { color: rgba(255,255,255,0.9); }
+
+.big-search-box input { flex: 1; border: none; font-size: 16px; padding: 12px 15px; border-left: 1px solid rgba(255,255,255,0.5); outline: none; background: transparent; color: white; margin-left: 10px; }
 .big-search-box input::placeholder { color: rgba(255,255,255,0.9); }
 .big-search-box button { background: #ff9d00; color: white; border: none; border-radius: 30px; padding: 10px 35px; font-size: 16px; cursor: pointer; transition: 0.3s; font-weight: bold; }
 .big-search-box button:hover { background: #ffaa00; transform: scale(1.05); }
@@ -252,7 +311,6 @@ onMounted(() => loadSpots())
 .spot-card:hover { transform: translateY(-8px); box-shadow: 0 12px 30px rgba(0,0,0,0.1); border-color: #ff9d00; }
 .card-img { height: 180px; position: relative; }
 .card-img img { width: 100%; height: 100%; object-fit: cover; }
-.price-badge { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.7); color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
 .rating-badge { position: absolute; top: 10px; right: 10px; background: rgba(255,157,0,0.9); color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: bold; }
 
 .card-info { padding: 15px; }

@@ -4,34 +4,34 @@
       <el-card class="data-card" shadow="hover">
         <template #header>👥 今日日活 (DAU)</template>
         <div class="num">{{ stats.dau }}</div>
-        <div class="trend up">实时数据 🟢</div>
+        <div class="trend up">实时 Redis 数据 🟢</div>
+      </el-card>
+
+      <el-card class="data-card" shadow="hover">
+        <template #header>💰 平台总销售额</template>
+        <div class="num" style="color:#ff9d00">¥{{ stats.totalSales }}</div>
+        <div class="trend">门票支付总计 📈</div>
       </el-card>
 
       <el-card class="data-card" shadow="hover">
         <template #header>📝 累计攻略数</template>
-        <div class="num">{{ stats.postCount }}</div>
+        <div class="num" style="color:#67c23a">{{ stats.postCount }}</div>
         <div class="trend">社区活跃内容</div>
       </el-card>
 
       <el-card class="data-card" shadow="hover">
-        <template #header>🏔️ 收录景点</template>
-        <div class="num">{{ stats.spotCount }}</div>
-        <div class="trend">平台核心资源</div>
-      </el-card>
-
-      <el-card class="data-card" shadow="hover">
-        <template #header>👤 注册用户</template>
-        <div class="num">{{ stats.userCount }}</div>
-        <div class="trend">持续增长中 📈</div>
+        <template #header>👤 注册总用户</template>
+        <div class="num" style="color:#909399">{{ stats.userCount }}</div>
+        <div class="trend">平台用户底座</div>
       </el-card>
     </div>
 
     <div class="chart-row">
-      <el-card class="chart-card">
-        <div ref="lineChart" style="height: 350px;"></div>
+      <el-card class="chart-card" shadow="never">
+        <div ref="lineChart" style="height: 380px;"></div>
       </el-card>
-      <el-card class="chart-card">
-        <div ref="pieChart" style="height: 350px;"></div>
+      <el-card class="chart-card" shadow="never">
+        <div ref="pieChart" style="height: 380px;"></div>
       </el-card>
     </div>
   </div>
@@ -40,11 +40,11 @@
 <script setup>
 import { ref, onMounted, reactive } from 'vue'
 import * as echarts from 'echarts'
-import axios from 'axios' // 🔥 引入 axios
+import axios from 'axios'
 
-// 🔥 定义响应式数据对象，初始值为 0
 const stats = reactive({
   dau: 0,
+  totalSales: 0,
   postCount: 0,
   spotCount: 0,
   userCount: 0
@@ -53,60 +53,79 @@ const stats = reactive({
 const lineChart = ref(null)
 const pieChart = ref(null)
 
-// 🔥 加载后台数据的方法
 const loadData = async () => {
   try {
     const res = await axios.get('http://localhost:8080/admin/stats')
     if (res.data.code === '200') {
-      // 将接口返回的数据覆盖到 stats 对象
-      Object.assign(stats, res.data.data)
+      const data = res.data.data
+      Object.assign(stats, data)
+      renderCharts(data.trendDates, data.trendData, data.pieData)
     }
   } catch (e) {
     console.error('获取看板数据失败', e)
   }
 }
 
-onMounted(async () => {
-  // 1. 页面加载时先去后台查数据
-  await loadData()
-
-  // 2. 初始化图表
+const renderCharts = (trendDates, trendData, pieData) => {
   const myLine = echarts.init(lineChart.value)
   myLine.setOption({
-    title: { text: '近七日用户访问量趋势' },
+    title: { text: '近七日用户活跃度趋势', textStyle: { fontSize: 16 } },
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] },
+    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    xAxis: { type: 'category', boundaryGap: false, data: trendDates },
     yAxis: { type: 'value' },
-    series: [{ data: [820, 932, 901, 934, 1290, 1330, 1320], type: 'line', smooth: true, areaStyle: {} }]
+    series: [{
+      data: trendData,
+      type: 'line',
+      smooth: true,
+      areaStyle: { color: 'rgba(64,158,255,0.2)' },
+      itemStyle: { color: '#409EFF' }
+    }]
   })
 
   const myPie = echarts.init(pieChart.value)
   myPie.setOption({
-    title: { text: '热门搜索景点占比' },
-    tooltip: { trigger: 'item' },
+    title: { text: '热门景点搜索占比 (Top 5)', left: 'center', textStyle: { fontSize: 16 } },
+    tooltip: { trigger: 'item', formatter: '{b} : {c} 热度 ({d}%)' },
+    legend: { bottom: '0', left: 'center' },
     series: [{
-      type: 'pie', radius: ['40%', '70%'],
-      data: [
-        { value: 1048, name: '上海迪士尼' },
-        { value: 735, name: '北京故宫' },
-        { value: 580, name: '外滩夜景' },
-        { value: 484, name: '长城' },
-        { value: 300, name: '环球影城' }
-      ]
+      type: 'pie',
+      // 🔥 修复点：缩小饼图半径，为外部文字留出充足空间
+      radius: ['35%', '55%'],
+      center: ['50%', '45%'],
+      itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
+      label: {
+        show: true,
+        // 🔥 修复点：使用换行符分隔名称与百分比，彻底解决横向挤压重叠问题
+        formatter: '{b}\n{d}%',
+        lineHeight: 18
+      },
+      labelLine: {
+        length: 15,
+        length2: 20 // 加长第二段引导线
+      },
+      data: pieData.length > 0 ? pieData : [{ name: '暂无数据', value: 0 }]
     }]
   })
 
-  window.onresize = () => { myLine.resize(); myPie.resize(); }
+  window.addEventListener('resize', () => {
+    myLine.resize()
+    myPie.resize()
+  })
+}
+
+onMounted(() => {
+  loadData()
 })
 </script>
 
 <style scoped>
-.dashboard { padding: 20px; }
-.card-row { display: flex; gap: 20px; margin-bottom: 20px; }
-.data-card { flex: 1; text-align: center; }
-.num { font-size: 32px; font-weight: bold; color: #409EFF; margin: 10px 0; }
+.dashboard { padding: 20px; background: #f0f2f5; min-height: calc(100vh - 60px); }
+.card-row { display: flex; gap: 20px; margin-bottom: 25px; }
+.data-card { flex: 1; text-align: center; border-radius: 10px; border: none; }
+.num { font-size: 34px; font-weight: bold; color: #409EFF; margin: 15px 0; font-family: 'Helvetica Neue', Arial, sans-serif; }
 .trend { font-size: 13px; color: #999; }
 .trend.up { color: #67c23a; }
 .chart-row { display: flex; gap: 20px; }
-.chart-card { flex: 1; }
+.chart-card { flex: 1; border-radius: 10px; border: none; }
 </style>

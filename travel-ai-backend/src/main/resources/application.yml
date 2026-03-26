@@ -34,7 +34,5 @@ mybatis-plus:
 
 # AI 配置 (自定义根节点)
 ai:
-  url: https://open.bigmodel.cn/api/paas/v4/chat/completions
-  # !!! 替换成你的 Key !!!
-  key: 72156ce82aee493c96b9f8705d36c1d4.87MAs8UTKMvBx1W6
-  model: glm-4-flash
+  key: fdf804ad2bd34b48a8679f6355eba626.h24hCvcWoK9YlbOd
+  model: GLM-4.7-Flash

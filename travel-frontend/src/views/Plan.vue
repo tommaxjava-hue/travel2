@@ -21,7 +21,7 @@
       <div class="select-list" v-loading="loading">
         <el-checkbox-group v-model="selectedSpots">
           <div v-for="spot in spotList" :key="spot.spotId" class="check-item">
-            <el-checkbox :label="spot" size="large" border>
+            <el-checkbox :value="spot" size="large" border>
               <div class="chk-content">
                 <span class="chk-name">{{ spot.name }}</span>
                 <span class="chk-tag">{{ spot.ticketPrice > 0 ? '¥'+spot.ticketPrice : '免费' }}</span>
@@ -40,7 +40,12 @@
       </div>
 
       <div class="result-box" v-if="routeResult.length > 0">
-        <h3>🚀 推荐顺序：</h3>
+        <div class="result-header">
+          <h3>🚀 推荐顺序：</h3>
+          <el-button type="success" size="small" @click="savePlan" :loading="saving" round icon="Check">
+            保存方案
+          </el-button>
+        </div>
         <el-steps direction="vertical" :active="routeResult.length">
           <el-step v-for="(name, index) in routeResult" :key="index" :title="name" />
         </el-steps>
@@ -64,12 +69,14 @@ const spotList = ref([])
 const selectedSpots = ref([])
 const loading = ref(false)
 const planning = ref(false)
+const saving = ref(false)
 const routeResult = ref([])
 let map = null
 let markers = []
 let routeLine = null
 
-// 城市坐标映射（简易版，为了地图定位，可根据需求扩展）
+const currentUser = JSON.parse(localStorage.getItem('user') || '{}')
+
 const cityCoords = {
   '上海': [31.2304, 121.4737],
   '北京': [39.9042, 116.4074],
@@ -79,20 +86,17 @@ const cityCoords = {
   '杭州': [30.2741, 120.1551]
 }
 
-// 1. 初始化加载所有城市
 const loadCities = async () => {
   try {
     const res = await axios.get('http://localhost:8080/attraction/cities')
     cityList.value = res.data.data
-    // 默认选中第一个
     if (cityList.value.length > 0) {
       selectedCity.value = cityList.value[0]
-      loadSpots() // 加载该城市景点
+      loadSpots()
     }
   } catch(e) {}
 }
 
-// 2. 加载对应景点
 const loadSpots = async () => {
   if(!selectedCity.value) return
   loading.value = true
@@ -101,13 +105,13 @@ const loadSpots = async () => {
 
   try {
     const res = await axios.get('http://localhost:8080/attraction/list', {
-      params: { city: selectedCity.value }
+      // 在规划页面通常不分页，请求足够大的 pageSize 获取同城所有景点供勾选
+      params: { city: selectedCity.value, pageNum: 1, pageSize: 500 }
     })
     if (res.data.code === '200') {
-      spotList.value = res.data.data
+      // 修复点 2：适配最新的后端物理分页返回结构，解析 res.data.data.list
+      spotList.value = res.data.data.list || []
     }
-
-    // 地图飞到该城市
     const center = cityCoords[selectedCity.value] || [39.9042, 116.4074]
     if (map) map.setView(center, 11)
     else initMap(center)
@@ -134,37 +138,56 @@ const generateRoute = async () => {
     if (res.data.code === '200') {
       const aiText = res.data.data
       const sortedNames = []
-      // 简单的按逗号分隔解析
       const rawList = aiText.split(/[,，、\n]/)
       rawList.forEach(token => {
         const cleanName = token.trim()
         const spot = selectedSpots.value.find(s => cleanName.includes(s.name) || s.name.includes(cleanName))
         if (spot && !sortedNames.includes(spot)) sortedNames.push(spot)
       })
-      // 如果解析失败，则按原顺序兜底
       const finalRoute = sortedNames.length > 1 ? sortedNames : selectedSpots.value
 
       routeResult.value = finalRoute.map(s => s.name)
       drawRouteOnMap(finalRoute)
-      ElMessage.success('规划完成！')
+      ElMessage.success('智能规划完成！')
     }
   } catch (e) {
-    ElMessage.error('规划失败')
+    ElMessage.error('规划失败，请稍后重试')
   } finally {
     planning.value = false
   }
 }
 
-// 🔥 核心修复：绘制路线并检查坐标有效性
+const savePlan = async () => {
+  if (!currentUser.userId) {
+    ElMessage.warning('请先登录后再保存行程')
+    return
+  }
+  saving.value = true
+  try {
+    const contentText = routeResult.value.map((name, index) => `第${index + 1}站: ${name}`).join('\n')
+    const res = await axios.post('http://localhost:8080/ai/saveItinerary', {
+      userId: currentUser.userId,
+      content: contentText
+    })
+    if (res.data.code === '200') {
+      ElMessage.success('行程已成功保存至个人中心！')
+    } else {
+      ElMessage.error(res.data.msg || '保存失败')
+    }
+  } catch (e) {
+    ElMessage.error('网络异常，保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
 const drawRouteOnMap = (routeSpots) => {
-  // 清除旧标记
   markers.forEach(m => map.removeLayer(m))
   if (routeLine) map.removeLayer(routeLine)
   markers = []
 
   const latlngs = []
   routeSpots.forEach((spot, index) => {
-    // 校验：只有经纬度齐全才绘制，避免新景点无坐标导致报错
     if (spot.latitude && spot.longitude) {
       const marker = L.marker([spot.latitude, spot.longitude])
           .addTo(map)
@@ -175,7 +198,6 @@ const drawRouteOnMap = (routeSpots) => {
     }
   })
 
-  // 绘制折线
   if (latlngs.length > 0) {
     routeLine = L.polyline(latlngs, { color: 'red', weight: 4, dashArray: '10, 10' }).addTo(map)
     map.fitBounds(L.latLngBounds(latlngs))
@@ -197,6 +219,7 @@ onMounted(() => {
 .chk-content { display: flex; justify-content: space-between; width: 100%; }
 .chk-tag { color: #ff9d00; font-weight: bold; }
 .action-bar { padding: 15px; border-top: 1px solid #eee; background: white; display: flex; justify-content: space-between; align-items: center; }
-.result-box { padding: 20px; background: #f0f9eb; border-top: 1px solid #e1f3d8; max-height: 200px; overflow-y: auto; }
+.result-box { padding: 20px; background: #f0f9eb; border-top: 1px solid #e1f3d8; max-height: 350px; overflow-y: auto; }
+.result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
 .map-container { flex: 1; background: #eee; z-index: 1; }
 </style>
